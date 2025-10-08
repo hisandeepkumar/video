@@ -1,483 +1,362 @@
 <!DOCTYPE html>
 <html lang="hi">
 <head>
-    <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width,initial-scale=1" />
-    <title>Gesture Video Player — Fixed</title>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>Gesture Video Player — MediaPipe Hands</title>
 
-    <!-- Use a recent OpenCV.js build; CDN may vary -->
-    <script async src="https://docs.opencv.org/4.7.0/opencv.js" type="text/javascript"></script>
+  <!-- MediaPipe CDN (jsDelivr) -->
+  <script src="https://cdn.jsdelivr.net/npm/@mediapipe/hands/hands.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@mediapipe/drawing_utils/drawing_utils.js"></script>
 
-    <style>
-        /* (आपका ओरिजिनल स्टाइल रखा है, थोड़े छोटे बदलाव) */
-        *{box-sizing:border-box;margin:0;padding:0;font-family:Segoe UI, Tahoma, Geneva, Verdana, sans-serif}
-        body{background:linear-gradient(135deg,#1a2a6c,#b21f1f,#fdbb2d);color:#fff;min-height:100vh;display:flex;flex-direction:column;align-items:center;padding:2rem}
-        .container{max-width:1200px;width:100%;display:flex;flex-direction:column;gap:1.5rem}
-        header{text-align:center}
-        h1{font-size:2rem;text-shadow:2px 2px 4px rgba(0,0,0,.5)}
-        .main-content{display:flex;flex-wrap:wrap;gap:1.5rem;justify-content:center}
-        .video-section,.gesture-section{flex:1;min-width:300px;background:rgba(0,0,0,.65);padding:1rem;border-radius:12px;box-shadow:0 10px 30px rgba(0,0,0,.4)}
-        .video-container{position:relative;padding-top:56.25%;border-radius:8px;overflow:hidden;background:#000}
-        video#videoPlayer, .fullscreen-video{position:absolute;top:0;left:0;width:100%;height:100%;object-fit:contain}
-        .controls{display:flex;flex-wrap:wrap;gap:.5rem;margin-top:.75rem}
-        .btn{padding:.6rem 1rem;border-radius:999px;border:none;background:#4a00e0;color:#fff;cursor:pointer;font-weight:700;display:inline-flex;align-items:center;gap:.5rem;box-shadow:0 4px 10px rgba(0,0,0,.25)}
-        .btn-fullscreen{background:#ff416c}
-        #webcam{width:100%;max-width:500px;border-radius:8px;background:#000}
-        canvas{width:100%;max-width:500px;border-radius:8px;background:#000;display:block}
-        .status{margin-top:1rem;padding:.6rem;border-radius:8px;text-align:center;font-weight:700;background:rgba(255,255,255,.08)}
-        .status.active{background:rgba(0,255,0,.12);color:#bfffbf}
-        .debug-info{margin-top:1rem;background:rgba(0,0,0,.5);padding:.6rem;border-radius:8px;font-family:monospace;font-size:.9rem;max-height:140px;overflow:auto}
-        footer{margin-top:1rem;opacity:.9;text-align:center}
-        .fullscreen-overlay{position:fixed;top:0;left:0;width:100vw;height:100vh;background:black;z-index:1000;display:none}
-        .close-fullscreen{position:absolute;top:20px;right:20px;background:rgba(0,0,0,.5);color:#fff;border:none;border-radius:50%;width:40px;height:40px;font-size:1.2rem;cursor:pointer;z-index:1001}
-        @media(max-width:768px){.main-content{flex-direction:column}}
-    </style>
+  <style>
+    *{box-sizing:border-box;margin:0;padding:0;font-family:Segoe UI, system-ui, Arial}
+    body{background:linear-gradient(135deg,#1a2a6c,#b21f1f,#fdbb2d);color:#fff;min-height:100vh;display:flex;flex-direction:column;align-items:center;padding:18px}
+    .container{max-width:1200px;width:100%}
+    header{text-align:center;margin-bottom:12px}
+    h1{font-size:28px;text-shadow:2px 2px 6px rgba(0,0,0,.4)}
+    .main{display:flex;gap:16px;flex-wrap:wrap;justify-content:center}
+    .card{background:rgba(0,0,0,.65);padding:14px;border-radius:12px;box-shadow:0 10px 30px rgba(0,0,0,.35);min-width:300px}
+    .videoBox{position:relative;padding-top:56.25%;background:#000;border-radius:8px;overflow:hidden}
+    video#videoPlayer, video#fullscreenVideo{position:absolute;left:0;top:0;width:100%;height:100%;object-fit:contain}
+    .controls{display:flex;gap:8px;margin-top:12px;flex-wrap:wrap}
+    .btn{padding:8px 12px;border-radius:999px;border:none;background:#4a00e0;color:#fff;cursor:pointer;font-weight:700}
+    .btn.full{background:#ff416c}
+    #webcam{width:100%;max-width:560px;border-radius:8px;background:#000}
+    canvas{width:100%;max-width:560px;border-radius:8px;background:#000;display:block}
+    .status{margin-top:8px;padding:8px;border-radius:8px;background:rgba(255,255,255,.06);font-weight:700;text-align:center}
+    .debug{margin-top:8px;background:rgba(0,0,0,.5);padding:8px;border-radius:8px;font-family:monospace;font-size:13px;max-height:140px;overflow:auto}
+    .overlay{position:fixed;inset:0;background:black;display:none;z-index:9999}
+    .closeBtn{position:absolute;right:18px;top:18px;background:rgba(0,0,0,.5);color:#fff;border:none;border-radius:50%;width:42px;height:42px;font-size:18px;cursor:pointer}
+    @media(max-width:800px){.main{flex-direction:column;align-items:center}}
+  </style>
 </head>
 <body>
-    <div class="container">
-        <header>
-            <h1>Gesture Video Player</h1>
-            <p class="subtitle">Control video playback with hand gestures — OpenCV.js</p>
-        </header>
+  <div class="container">
+    <header>
+      <h1>Gesture Video Player — MediaPipe</h1>
+      <p>Open hand = play/pause · Thumbs up/down = volume · Swipe = seek</p>
+    </header>
 
-        <div class="main-content">
-            <div class="video-section">
-                <h2>Video Player</h2>
-                <div class="video-container">
-                    <video id="videoPlayer" controls crossorigin="anonymous">
-                        Your browser does not support video.
-                    </video>
-                </div>
-
-                <div class="controls">
-                    <button class="btn" id="playPauseBtn">▶️ Play/Pause</button>
-                    <button class="btn" id="volumeUpBtn">🔊 Volume +</button>
-                    <button class="btn" id="volumeDownBtn">🔉 Volume -</button>
-                    <button class="btn" id="seekForwardBtn">⏩ +10s</button>
-                    <button class="btn" id="seekBackwardBtn">⏪ -10s</button>
-                    <button class="btn btn-fullscreen" id="fullscreenBtn">📺 Fullscreen</button>
-                </div>
-
-                <div style="margin-top:.75rem">
-                    <input type="file" id="fileInput" accept="video/*" style="display:none">
-                    <button class="btn" id="uploadBtn">📁 Upload Video</button>
-                    <p style="opacity:.9;margin-top:.25rem">Supported: MP4, WebM, OGG</p>
-                </div>
-            </div>
-
-            <div class="gesture-section">
-                <h2>Gesture Controls</h2>
-                <div>
-                    <video id="webcam" autoplay playsinline muted></video>
-                    <canvas id="canvasOutput"></canvas>
-
-                    <div style="display:flex;gap:.5rem;margin-top:.5rem;flex-wrap:wrap">
-                        <canvas id="thresholdCanvas" style="flex:1;min-width:150px;height:120px;"></canvas>
-                        <canvas id="contourCanvas" style="flex:1;min-width:150px;height:120px;"></canvas>
-                    </div>
-
-                    <div id="gestureStatus" class="status">Gesture recognition inactive</div>
-                    <div id="debugInfo" class="debug-info">Debug info...</div>
-                </div>
-            </div>
+    <div class="main">
+      <div class="card" style="flex:1;min-width:320px;max-width:640px">
+        <h3>Video Player</h3>
+        <div class="videoBox">
+          <video id="videoPlayer" controls crossorigin="anonymous"></video>
         </div>
 
-        <footer>
-            Gesture Video Player © — Fixed version
-        </footer>
+        <div class="controls">
+          <button class="btn" id="playPauseBtn">▶️ Play/Pause</button>
+          <button class="btn" id="volUp">🔊 +</button>
+          <button class="btn" id="volDown">🔉 -</button>
+          <button class="btn" id="fwd">⏩ +10s</button>
+          <button class="btn" id="back">⏪ -10s</button>
+          <button class="btn full" id="enterFS">📺 Fullscreen</button>
+        </div>
+
+        <div style="margin-top:10px">
+          <input type="file" id="fileInput" accept="video/*" style="display:none">
+          <button class="btn" id="uploadBtn">📁 Upload Video</button>
+          <p style="opacity:.9;margin-top:6px">Sample: BigBuckBunny loaded by default</p>
+        </div>
+      </div>
+
+      <div class="card" style="flex:1;min-width:320px;max-width:640px">
+        <h3>Webcam & Gestures</h3>
+        <video id="webcam" autoplay playsinline muted></video>
+        <canvas id="overlayCanvas"></canvas>
+
+        <div style="display:flex;gap:8px;margin-top:8px">
+          <canvas id="thumbCanvas" style="flex:1;min-width:140px;height:120px;"></canvas>
+          <canvas id="landmarkCanvas" style="flex:1;min-width:140px;height:120px;"></canvas>
+        </div>
+
+        <div id="gestureStatus" class="status">Gesture recognition inactive</div>
+        <div id="debug" class="debug">Initializing...</div>
+      </div>
     </div>
 
-    <div id="fullscreenOverlay" class="fullscreen-overlay">
-        <button id="closeFullscreen" class="close-fullscreen">✕</button>
-        <video id="fullscreenVideo" class="fullscreen-video" controls></video>
-    </div>
+    <footer style="margin-top:12px;text-align:center;opacity:.9">MediaPipe integration — demo</footer>
+  </div>
+
+  <div id="fsOverlay" class="overlay">
+    <button id="closeFs" class="closeBtn">✕</button>
+    <video id="fullscreenVideo" class="" controls style="width:100%;height:100%;object-fit:contain"></video>
+  </div>
 
 <script>
-/* ---------------------
-   Elements
-   --------------------- */
+/* -----------------------
+   Basic video controls
+   ----------------------- */
 const videoPlayer = document.getElementById('videoPlayer');
-const uploadBtn = document.getElementById('uploadBtn');
-const fileInput = document.getElementById('fileInput');
-const playPauseBtn = document.getElementById('playPauseBtn');
-const volumeUpBtn = document.getElementById('volumeUpBtn');
-const volumeDownBtn = document.getElementById('volumeDownBtn');
-const seekForwardBtn = document.getElementById('seekForwardBtn');
-const seekBackwardBtn = document.getElementById('seekBackwardBtn');
-const fullscreenBtn = document.getElementById('fullscreenBtn');
-const fullscreenOverlay = document.getElementById('fullscreenOverlay');
 const fullscreenVideo = document.getElementById('fullscreenVideo');
-const closeFullscreen = document.getElementById('closeFullscreen');
+const fileInput = document.getElementById('fileInput');
+const uploadBtn = document.getElementById('uploadBtn');
+const playPauseBtn = document.getElementById('playPauseBtn');
+const volUp = document.getElementById('volUp'), volDown = document.getElementById('volDown');
+const fwd = document.getElementById('fwd'), back = document.getElementById('back');
+const enterFS = document.getElementById('enterFS');
+const fsOverlay = document.getElementById('fsOverlay'), closeFs = document.getElementById('closeFs');
 
-const webcam = document.getElementById('webcam');
-const canvasOutput = document.getElementById('canvasOutput');
-const thresholdCanvas = document.getElementById('thresholdCanvas');
-const contourCanvas = document.getElementById('contourCanvas');
+videoPlayer.src = "https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/BigBuckBunny.mp4";
+fullscreenVideo.src = videoPlayer.src;
+
+uploadBtn.addEventListener('click', ()=>fileInput.click());
+fileInput.addEventListener('change', e=>{
+  const f = e.target.files[0]; if (!f) return;
+  const url = URL.createObjectURL(f);
+  videoPlayer.src = url; fullscreenVideo.src = url;
+  videoPlayer.play().catch(()=>{});
+});
+playPauseBtn.addEventListener('click', ()=>{ videoPlayer.paused?videoPlayer.play():videoPlayer.pause(); });
+volUp.addEventListener('click', ()=>changeVol(0.1)); volDown.addEventListener('click', ()=>changeVol(-0.1));
+fwd.addEventListener('click', ()=>seek(10)); back.addEventListener('click', ()=>seek(-10));
+enterFS.addEventListener('click', ()=>{ fsOverlay.style.display='block'; fullscreenVideo.currentTime = videoPlayer.currentTime; if(!videoPlayer.paused) fullscreenVideo.play(); });
+closeFs.addEventListener('click', ()=>{ fsOverlay.style.display='none'; videoPlayer.currentTime = fullscreenVideo.currentTime; if(!fullscreenVideo.paused){ videoPlayer.play(); } fullscreenVideo.pause(); });
+
+function changeVol(d){ videoPlayer.volume = Math.max(0, Math.min(1, videoPlayer.volume + d)); }
+function seek(s){ if (isFinite(videoPlayer.duration)) videoPlayer.currentTime = Math.max(0, Math.min(videoPlayer.duration, videoPlayer.currentTime + s)); }
+
+/* -----------------------
+   MediaPipe Hands setup
+   ----------------------- */
+/* Sources:
+   - jsDelivr CDN for @mediapipe/hands and camera_utils. See jsDelivr and MediaPipe docs.
+   (references retained in chat for traceability) */
+const webcamElement = document.getElementById('webcam');
+const overlayCanvas = document.getElementById('overlayCanvas');
+const overlayCtx = overlayCanvas.getContext('2d');
+const thumbCanvas = document.getElementById('thumbCanvas');
+const thumbCtx = thumbCanvas.getContext('2d');
+const landmarkCanvas = document.getElementById('landmarkCanvas');
+const landmarkCtx = landmarkCanvas.getContext('2d');
 const gestureStatus = document.getElementById('gestureStatus');
-const debugInfo = document.getElementById('debugInfo');
+const debug = document.getElementById('debug');
 
-/* ---------------------
-   State
-   --------------------- */
-let stream = null;
-let isOpenCvReady = false;
-let isGestureActive = false;
-let lastGestureTime = 0;
-const GESTURE_COOLDOWN = 1200;
-let handHistory = [];
-let cap = null; // VideoCapture instance (will be created after webcam is ready)
+let camera = null;
+let hands = null;
 
-/* ---------------------
-   Video upload & controls
-   --------------------- */
-uploadBtn.addEventListener('click', () => fileInput.click());
-fileInput.addEventListener('change', e => {
-    const f = e.target.files[0];
-    if (!f) return;
-    const url = URL.createObjectURL(f);
-    videoPlayer.src = url;
-    fullscreenVideo.src = url;
-    videoPlayer.play().catch(()=>{});
+/* history for swipe detection */
+let wristHistory = [];
+const HISTORY_MAX = 12;
+const SWIPE_THRESHOLD = 80; // pixels difference to consider swipe
+const GESTURE_COOLDOWN = 1200; // ms
+let lastGestureTs = 0;
+
+function isCooldown(){ return (Date.now() - lastGestureTs) < GESTURE_COOLDOWN; }
+
+/* helpers to determine finger extended.
+   Landmarks indices: 0 wrist, 1 thumb_cmc, 2 thumb_mcp, 3 thumb_ip, 4 thumb_tip,
+   5 index_mcp,6 index_pip,7 index_dip,8 index_tip, similarly 9-12,13-16,17-20 for other fingers.
+*/
+function countExtendedFingers(landmarks, handedness){
+  // returns number of extended fingers excluding thumb, and thumbExtended boolean
+  if (!landmarks) return {count:0, thumb:false};
+  // For index..pinky: tip.y < pip.y means finger is up (remember y grows down)
+  const tips = [8,12,16,20];
+  const pips = [6,10,14,18];
+  let cnt = 0;
+  for (let i=0;i<4;i++){
+    if (landmarks[tips[i]].y < landmarks[pips[i]].y - 0.02) cnt++;
+  }
+  // thumb heuristic: compare tip.x vs ip.x depending on handedness
+  // for Right hand, if thumb_tip.x < thumb_ip.x -> thumb folded inward (approx). For thumb extended to right, tip.x > ip.x
+  let thumbExtended = false;
+  try {
+    const tTip = landmarks[4], tIp = landmarks[3];
+    if (handedness === 'Right') {
+      thumbExtended = (tTip.x > tIp.x + 0.02);
+    } else {
+      thumbExtended = (tTip.x < tIp.x - 0.02);
+    }
+  } catch(e){}
+  return {count:cnt, thumb:thumbExtended};
+}
+
+/* gesture inference using simple heuristics */
+function inferGesture(landmarks, handedness){
+  if (!landmarks) return null;
+  // wrist pos
+  const wrist = landmarks[0];
+  // finger extents
+  const {count, thumb} = countExtendedFingers(landmarks, handedness);
+
+  // Open hand (all 5 extended)
+  if (count === 4 && thumb) return 'openHand';
+
+  // Thumbs up: thumb extended, other fingers folded, thumb tip above wrist (y smaller)
+  if (thumb && count <= 1 && landmarks[4].y < landmarks[0].y - 0.06) return 'thumbsUp';
+
+  // Thumbs down: thumb extended, others folded, thumb tip below wrist
+  if (thumb && count <= 1 && landmarks[4].y > landmarks[0].y + 0.06) return 'thumbsDown';
+
+  // Two-hand open detection will be handled externally (multi-hand)
+  return null;
+}
+
+/* onResults callback from MediaPipe Hands */
+function onResults(results){
+  // Resize overlay to webcam size
+  if (webcamElement.videoWidth === 0) return;
+  overlayCanvas.width = webcamElement.videoWidth;
+  overlayCanvas.height = webcamElement.videoHeight;
+  thumbCanvas.width = webcamElement.videoWidth;
+  thumbCanvas.height = webcamElement.videoHeight;
+  landmarkCanvas.width = webcamElement.videoWidth;
+  landmarkCanvas.height = webcamElement.videoHeight;
+
+  // draw video frame first
+  overlayCtx.save();
+  overlayCtx.clearRect(0,0,overlayCanvas.width,overlayCanvas.height);
+  overlayCtx.drawImage(results.image, 0, 0, overlayCanvas.width, overlayCanvas.height);
+
+  debug.textContent = '';
+
+  // if no hands
+  if (!results.multiHandLandmarks || results.multiHandLandmarks.length === 0){
+    gestureStatus.textContent = "No hands detected";
+    // keep wrist history short
+    if (wristHistory.length > 0) wristHistory.shift();
+    overlayCtx.restore();
+    return;
+  }
+
+  // draw landmarks with drawing_utils for nice look
+  for (let i=0;i<results.multiHandLandmarks.length;i++){
+    const landmarks = results.multiHandLandmarks[i];
+    // draw connections + landmarks
+    window.drawConnectors(overlayCtx, landmarks, window.HAND_CONNECTIONS, {color:'#00FF00', lineWidth:2});
+    window.drawLandmarks(overlayCtx, landmarks, {color:'#FF0000', lineWidth:1});
+  }
+
+  // Gesture logic:
+  // If two hands and both open -> fullscreen
+  if (results.multiHandLandmarks.length >= 2) {
+    const g1 = inferGesture(results.multiHandLandmarks[0], results.multiHandedness && results.multiHandedness[0] ? results.multiHandedness[0].label : 'Right');
+    const g2 = inferGesture(results.multiHandLandmarks[1], results.multiHandedness && results.multiHandedness[1] ? results.multiHandedness[1].label : 'Left');
+    if (g1 === 'openHand' && g2 === 'openHand' && !isCooldown()) {
+      lastGestureTs = Date.now();
+      gestureStatus.textContent = 'Gesture: Two-hand open → Fullscreen';
+      enterFullscreenFromGesture();
+    }
+  }
+
+  // handle first (primary) hand for other gestures
+  const primary = results.multiHandLandmarks[0];
+  const handedness = (results.multiHandedness && results.multiHandedness[0] && results.multiHandedness[0].label) ? results.multiHandedness[0].label : 'Right';
+  const g = inferGesture(primary, handedness);
+
+  // Update wrist history
+  const wrist = primary[0];
+  // convert normalized x to pixel
+  const wristXpx = wrist.x * overlayCanvas.width;
+  wristHistory.push(wristXpx);
+  if (wristHistory.length > HISTORY_MAX) wristHistory.shift();
+
+  // compute swipe if enough history
+  if (wristHistory.length >= HISTORY_MAX && !isCooldown()){
+    const dx = wristHistory[wristHistory.length-1] - wristHistory[0];
+    if (Math.abs(dx) > SWIPE_THRESHOLD && Math.abs(dx) > 30){
+      if (dx > 0){
+        // swipe right
+        lastGestureTs = Date.now();
+        gestureStatus.textContent = 'Gesture: Swipe Right → +10s';
+        seek(10);
+      } else {
+        lastGestureTs = Date.now();
+        gestureStatus.textContent = 'Gesture: Swipe Left → -10s';
+        seek(-10);
+      }
+      wristHistory = [];
+    }
+  }
+
+  if (g && !isCooldown()){
+    lastGestureTs = Date.now();
+    if (g === 'openHand'){
+      gestureStatus.textContent = 'Gesture: Open Hand → Play/Pause';
+      togglePlayPauseFromGesture();
+    } else if (g === 'thumbsUp'){
+      gestureStatus.textContent = 'Gesture: Thumbs Up → Volume +';
+      changeVol(0.12);
+    } else if (g === 'thumbsDown'){
+      gestureStatus.textContent = 'Gesture: Thumbs Down → Volume -';
+      changeVol(-0.12);
+    }
+  }
+
+  // debug show landmark count and handedness
+  debug.textContent = `Hands: ${results.multiHandLandmarks.length}\nHandedness: ${results.multiHandedness ? results.multiHandedness.map(h=>h.label).join(', ') : 'N/A'}`;
+
+  overlayCtx.restore();
+}
+
+/* small helpers for gesture triggers */
+function togglePlayPauseFromGesture(){ if (videoPlayer.paused) videoPlayer.play().catch(()=>{}); else videoPlayer.pause(); }
+function enterFullscreenFromGesture(){ fsOverlay.style.display='block'; fullscreenVideo.src = videoPlayer.currentSrc || videoPlayer.src; fullscreenVideo.currentTime = videoPlayer.currentTime; if(!videoPlayer.paused) fullscreenVideo.play().catch(()=>{}); }
+
+/* Initialize MediaPipe Hands and camera */
+async function initMediaPipe(){
+  hands = new window.Hands({
+    locateFile: (file) => {
+      // the CDN path (jsDelivr)
+      return `https://cdn.jsdelivr.net/npm/@mediapipe/hands/${file}`;
+    }
+  });
+
+  hands.setOptions({
+    maxNumHands: 2,
+    modelComplexity: 1,
+    minDetectionConfidence: 0.6,
+    minTrackingConfidence: 0.6
+  });
+
+  hands.onResults(onResults);
+
+  camera = new window.Camera(webcamElement, {
+    onFrame: async () => {
+      await hands.send({image: webcamElement});
+    },
+    width: 640,
+    height: 480
+  });
+
+  try {
+    await camera.start();
+    gestureStatus.textContent = 'Gesture recognition active';
+  } catch (e) {
+    console.error("Camera start failed:", e);
+    gestureStatus.textContent = 'Webcam access denied / unavailable';
+    debug.textContent = String(e);
+  }
+}
+
+/* launch when page loads */
+window.addEventListener('load', ()=>{
+  // prepare canvas size once webcam plays
+  webcamElement.addEventListener('loadeddata', ()=>{
+    overlayCanvas.width = webcamElement.videoWidth;
+    overlayCanvas.height = webcamElement.videoHeight;
+  });
+
+  initMediaPipe().catch(e=>{
+    console.error("MediaPipe init error:", e);
+    debug.textContent = "MediaPipe init error: " + (e && e.message ? e.message : e);
+  });
 });
 
-playPauseBtn.addEventListener('click', togglePlayPause);
-volumeUpBtn.addEventListener('click', ()=> changeVolume(0.1));
-volumeDownBtn.addEventListener('click', ()=> changeVolume(-0.1));
-seekForwardBtn.addEventListener('click', ()=> seekVideo(10));
-seekBackwardBtn.addEventListener('click', ()=> seekVideo(-10));
-fullscreenBtn.addEventListener('click', enterFullscreen);
-closeFullscreen.addEventListener('click', exitFullscreen);
-
-function togglePlayPause(){ videoPlayer.paused ? videoPlayer.play() : videoPlayer.pause(); }
-function changeVolume(d){ videoPlayer.volume = Math.max(0, Math.min(1, videoPlayer.volume + d)); }
-function seekVideo(s){ if (isFinite(videoPlayer.duration)) videoPlayer.currentTime = Math.max(0, Math.min(videoPlayer.duration, videoPlayer.currentTime + s)); }
-
-function enterFullscreen(){
-    fullscreenOverlay.style.display = 'block';
-    fullscreenVideo.src = videoPlayer.currentSrc || videoPlayer.src;
-    fullscreenVideo.currentTime = videoPlayer.currentTime || 0;
-    if (!videoPlayer.paused) { fullscreenVideo.play().catch(()=>{}); }
-}
-function exitFullscreen(){
-    fullscreenOverlay.style.display = 'none';
-    if (!fullscreenVideo.paused) {
-        videoPlayer.currentTime = fullscreenVideo.currentTime;
-        videoPlayer.play().catch(()=>{});
-    } else {
-        videoPlayer.currentTime = fullscreenVideo.currentTime;
-        videoPlayer.pause();
-    }
-    fullscreenVideo.pause();
-}
-
-/* ---------------------
-   OpenCV readiness
-   --------------------- */
-function onOpenCvReady(){
-    isOpenCvReady = true;
-    debugInfo.textContent = "OpenCV ready.";
-    // If webcam already initialized, start recognition
-    if (webcam.videoWidth > 0 && webcam.videoHeight > 0 && !isGestureActive) {
-        initializeGestureRecognition();
-    }
-}
-
-// If library already exposes onRuntimeInitialized, hook it
-if (typeof cv !== 'undefined') {
-    if (cv['onRuntimeInitialized']) {
-        cv['onRuntimeInitialized'] = onOpenCvReady;
-    } else if (cv.getBuildInformation) {
-        // already initialized
-        onOpenCvReady();
-    } else {
-        // fallback
-        cv['onRuntimeInitialized'] = onOpenCvReady;
-    }
-} else {
-    // Wait for script to load — set a polling fallback
-    let waitCount = 0;
-    const waiter = setInterval(()=>{
-        if (typeof cv !== 'undefined') {
-            clearInterval(waiter);
-            cv['onRuntimeInitialized'] = onOpenCvReady;
-        }
-        if (++waitCount > 60) clearInterval(waiter);
-    },200);
-}
-
-/* ---------------------
-   Start webcam
-   --------------------- */
-async function startWebcam(){
-    try {
-        stream = await navigator.mediaDevices.getUserMedia({ video: { width:640, height:480, facingMode:"user" }, audio:false });
-        webcam.srcObject = stream;
-        await webcam.play();
-
-        // Set canvas pixel-size to match video
-        canvasOutput.width = webcam.videoWidth;
-        canvasOutput.height = webcam.videoHeight;
-        thresholdCanvas.width = webcam.videoWidth;
-        thresholdCanvas.height = webcam.videoHeight;
-        contourCanvas.width = webcam.videoWidth;
-        contourCanvas.height = webcam.videoHeight;
-
-        debugInfo.textContent = `Webcam ready: ${webcam.videoWidth}x${webcam.videoHeight}`;
-
-        // create VideoCapture only once
-        cap = new cv.VideoCapture(webcam);
-
-        if (isOpenCvReady && !isGestureActive) initializeGestureRecognition();
-    } catch (err) {
-        console.error("Webcam error:", err);
-        debugInfo.textContent = "Webcam access denied or not available: " + (err && err.message ? err.message : err);
-        gestureStatus.textContent = "Webcam access denied";
-    }
-}
-
-/* ---------------------
-   Gesture pipeline
-   --------------------- */
-function initializeGestureRecognition(){
-    isGestureActive = true;
-    gestureStatus.classList.add('active');
-    gestureStatus.textContent = "Gesture recognition active";
-    requestAnimationFrame(processVideoLoop);
-}
-
-function processVideoLoop(){
-    if (!isGestureActive) return;
-    try {
-        // read frame
-        let src = new cv.Mat();
-        cap.read(src); // src is CV_8UC4
-
-        if (src.empty()) {
-            src.delete();
-            requestAnimationFrame(processVideoLoop);
-            return;
-        }
-
-        processFrame(src);
-
-        src.delete();
-    } catch (err) {
-        console.error("Processing error:", err);
-        debugInfo.textContent = "Processing error: " + (err && err.message ? err.message : err);
-    }
-    requestAnimationFrame(processVideoLoop);
-}
-
-function processFrame(src){
-    // Convert to gray
-    let gray = new cv.Mat();
-    cv.cvtColor(src, gray, cv.COLOR_RGBA2GRAY);
-
-    // blur + adaptive threshold (works ok in varied light)
-    let blurred = new cv.Mat();
-    cv.GaussianBlur(gray, blurred, new cv.Size(5,5), 0);
-
-    let thresh = new cv.Mat();
-    cv.adaptiveThreshold(blurred, thresh, 255, cv.ADAPTIVE_THRESH_GAUSSIAN_C, cv.THRESH_BINARY_INV, 11, 2);
-
-    // morphology to clean up
-    let kernel = cv.getStructuringElement(cv.MORPH_ELLIPSE, new cv.Size(5,5));
-    cv.morphologyEx(thresh, thresh, cv.MORPH_OPEN, kernel);
-    cv.morphologyEx(thresh, thresh, cv.MORPH_CLOSE, kernel);
-
-    // find contours
-    let contours = new cv.MatVector();
-    let hierarchy = new cv.Mat();
-    cv.findContours(thresh, contours, hierarchy, cv.RETR_EXTERNAL, cv.CHAIN_APPROX_SIMPLE);
-
-    // find largest contour
-    let maxArea = 0;
-    let largestContour = null;
-    for (let i=0;i<contours.size();i++){
-        let cnt = contours.get(i);
-        let area = cv.contourArea(cnt);
-        if (area > maxArea){
-            maxArea = area;
-            if (largestContour) largestContour.delete();
-            largestContour = cnt.clone(); // clone so safe after contours.delete()
-        }
-        cnt.delete(); // delete the temporary one
-    }
-
-    // draw views + detect gestures
-    if (largestContour && maxArea > 3000) {
-        let rect = cv.boundingRect(largestContour);
-        let handCenter = { x: rect.x + rect.width/2, y: rect.y + rect.height/2 };
-
-        // keep history for swipe detection
-        handHistory.push(handCenter);
-        if (handHistory.length > 12) handHistory.shift();
-
-        // detect gesture from contour & motion
-        detectGestures(largestContour, rect, handCenter);
-
-        // Render overlay: draw webcam frame first on canvas 2D
-        drawHandDetectionUsingPoints(largestContour, rect, handCenter);
-
-        // threshold and contour canvases
-        try {
-            // threshold view
-            let tmpRGBA = new cv.Mat();
-            cv.cvtColor(thresh, tmpRGBA, cv.COLOR_GRAY2RGBA);
-            cv.imshow(thresholdCanvas, tmpRGBA);
-            tmpRGBA.delete();
-        } catch(e){ console.warn(e); }
-
-        // contour view: draw contour onto black bg
-        try {
-            let contourImg = new cv.Mat.zeros(thresh.rows, thresh.cols, cv.CV_8UC3);
-            let color = new cv.Scalar(0,255,0);
-            let cvVec = new cv.MatVector();
-            cvVec.push_back(largestContour);
-            cv.drawContours(contourImg, cvVec, -1, color, 2);
-            cv.imshow(contourCanvas, contourImg);
-            contourImg.delete();
-            cvVec.delete();
-        } catch(e){ console.warn(e); }
-
-        largestContour.delete();
-    } else {
-        // no hand found — just copy webcam to canvas
-        let ctx = canvasOutput.getContext('2d');
-        ctx.drawImage(webcam, 0, 0, canvasOutput.width, canvasOutput.height);
-        debugInfo.textContent = "No hand detected. Ensure good lighting and that your hand is in frame.";
-        // clear auxiliary canvases
-        let tctx = thresholdCanvas.getContext('2d'); tctx.clearRect(0,0,thresholdCanvas.width,thresholdCanvas.height);
-        let cctx = contourCanvas.getContext('2d'); cctx.clearRect(0,0,contourCanvas.width,contourCanvas.height);
-    }
-
-    // cleanup
-    gray.delete(); blurred.delete(); thresh.delete(); kernel.delete();
-    contours.delete(); hierarchy.delete();
-}
-
-function drawHandDetectionUsingPoints(contour, rect, handCenter){
-    // draw webcam frame first
-    let ctx = canvasOutput.getContext('2d');
-    ctx.clearRect(0,0,canvasOutput.width,canvasOutput.height);
-    ctx.drawImage(webcam, 0, 0, canvasOutput.width, canvasOutput.height);
-
-    // bounding rect
-    ctx.strokeStyle = '#00ff00'; ctx.lineWidth = 2;
-    ctx.strokeRect(rect.x, rect.y, rect.width, rect.height);
-
-    // contour points from data32S (x,y,x,y,...)
-    try {
-        const data = contour.data32S;
-        if (data && data.length >= 2) {
-            ctx.beginPath();
-            ctx.strokeStyle = '#ff00ff';
-            ctx.lineWidth = 2;
-            ctx.moveTo(data[0], data[1]);
-            for (let i=2;i<data.length;i+=2){
-                ctx.lineTo(data[i], data[i+1]);
-            }
-            ctx.closePath();
-            ctx.stroke();
-        }
-    } catch(e){
-        console.warn("Contour draw error:", e);
-    }
-
-    // center
-    ctx.fillStyle = '#ff0000';
-    ctx.beginPath(); ctx.arc(handCenter.x, handCenter.y, 5, 0, Math.PI*2); ctx.fill();
-
-    // history trail
-    if (handHistory.length > 1){
-        ctx.strokeStyle = '#00ffff'; ctx.lineWidth = 2;
-        ctx.beginPath(); ctx.moveTo(handHistory[0].x, handHistory[0].y);
-        for (let i=1;i<handHistory.length;i++) ctx.lineTo(handHistory[i].x, handHistory[i].y);
-        ctx.stroke();
-    }
-
-    // small hint
-    ctx.fillStyle = 'white'; ctx.font = '16px Arial';
-    ctx.fillText('Show hand to control video', 10, 24);
-}
-
-function detectGestures(contour, rect, handCenter){
-    const now = Date.now();
-    if (now - lastGestureTime < GESTURE_COOLDOWN) return;
-
-    let areaRect = rect.width * rect.height;
-    let contourAreaVal = Math.max(1, cv.contourArea(contour));
-    let extent = contourAreaVal / Math.max(1, areaRect);
-    let aspect = rect.width / Math.max(1, rect.height);
-
-    debugInfo.textContent = `Aspect:${aspect.toFixed(2)} AreaRect:${areaRect} ContourArea:${Math.round(contourAreaVal)} Extent:${extent.toFixed(2)}`;
-
-    // simple heuristics:
-    if (aspect > 1.25 && extent > 0.45) {
-        applyGesture('openHand', 'Play/Pause');
-        lastGestureTime = now;
-        return;
-    }
-    if (aspect < 0.8 && extent > 0.35) {
-        if (handCenter.y < canvasOutput.height/2) {
-            applyGesture('thumbsUp', 'Volume Up');
-        } else {
-            applyGesture('thumbsDown', 'Volume Down');
-        }
-        lastGestureTime = now;
-        return;
-    }
-
-    // detect swipe from history
-    if (handHistory.length >= 6) {
-        let start = handHistory[0], end = handHistory[handHistory.length-1];
-        let dx = end.x - start.x, dy = end.y - start.y;
-        if (Math.abs(dx) > Math.abs(dy)*2 && Math.abs(dx) > 40) {
-            if (dx > 0) { applyGesture('swipeRight','Forward 10s'); lastGestureTime = now; return; }
-            else { applyGesture('swipeLeft','Backward 10s'); lastGestureTime = now; return; }
-        }
-        if (Math.abs(dy) > Math.abs(dx)*2 && Math.abs(dy) > 50 && areaRect > 12000) {
-            applyGesture('stop','Fullscreen'); lastGestureTime = now; return;
-        }
-    }
-}
-
-function applyGesture(type,label){
-    debugInfo.textContent += ` | Gesture:${type}`;
-    switch(type){
-        case 'openHand': togglePlayPause(); break;
-        case 'thumbsUp': changeVolume(0.1); break;
-        case 'thumbsDown': changeVolume(-0.1); break;
-        case 'swipeRight': seekVideo(10); break;
-        case 'swipeLeft': seekVideo(-10); break;
-        case 'stop': enterFullscreen(); break;
-    }
-    // show temporary status
-    const prev = gestureStatus.textContent;
-    gestureStatus.textContent = `Gesture: ${label}`;
-    gestureStatus.classList.add('active');
-    setTimeout(()=> { gestureStatus.textContent = "Gesture recognition active"; }, 1100);
-}
-
-/* ---------------------
-   Init on load
-   --------------------- */
-window.addEventListener('load', async () => {
-    // set default sample video
-    videoPlayer.src = "https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/BigBuckBunny.mp4";
-    fullscreenVideo.src = videoPlayer.src;
-
-    // start webcam
-    await startWebcam();
-
-    // If OpenCV already ready earlier, it will call initializeGestureRecognition
-});
-
+/* cleanup on unload */
 window.addEventListener('beforeunload', ()=>{
-    try {
-        if (stream) stream.getTracks().forEach(t => t.stop());
-    } catch(e){}
+  try {
+    if (camera) camera.stop();
+  } catch(e){}
 });
+
+/* small UI helpers already used above */
+function changeVol(d){ videoPlayer.volume = Math.max(0, Math.min(1, videoPlayer.volume + d)); }
+function seek(s){ if (isFinite(videoPlayer.duration)) videoPlayer.currentTime = Math.max(0, Math.min(videoPlayer.duration, videoPlayer.currentTime + s)); }
+function togglePlayPause(){ videoPlayer.paused?videoPlayer.play().catch(()=>{}):videoPlayer.pause(); }
 </script>
 </body>
 </html>
