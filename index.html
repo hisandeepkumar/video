@@ -145,7 +145,7 @@
             max-width: 500px;
             border-radius: 10px;
             background: #000;
-            display: none;
+            display: block;
         }
 
         .gesture-info {
@@ -259,6 +259,35 @@
             font-size: 0.9rem;
             max-height: 150px;
             overflow-y: auto;
+            width: 100%;
+        }
+
+        .visualization-container {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 1rem;
+            justify-content: center;
+            margin-top: 1rem;
+        }
+
+        .visualization-box {
+            flex: 1;
+            min-width: 200px;
+            background: rgba(0, 0, 0, 0.5);
+            border-radius: 10px;
+            padding: 1rem;
+            text-align: center;
+        }
+
+        .visualization-box h3 {
+            margin-bottom: 0.5rem;
+            font-size: 1rem;
+        }
+
+        .visualization-canvas {
+            width: 100%;
+            border-radius: 5px;
+            background: #000;
         }
 
         @media (max-width: 768px) {
@@ -268,6 +297,10 @@
             
             h1 {
                 font-size: 2rem;
+            }
+            
+            .visualization-container {
+                flex-direction: column;
             }
         }
     </style>
@@ -323,6 +356,18 @@
                 <div class="gesture-container">
                     <video id="webcam" autoplay playsinline></video>
                     <canvas id="canvasOutput"></canvas>
+                    
+                    <div class="visualization-container">
+                        <div class="visualization-box">
+                            <h3>Threshold View</h3>
+                            <canvas id="thresholdCanvas" class="visualization-canvas"></canvas>
+                        </div>
+                        <div class="visualization-box">
+                            <h3>Contour View</h3>
+                            <canvas id="contourCanvas" class="visualization-canvas"></canvas>
+                        </div>
+                    </div>
+                    
                     <div class="status inactive" id="gestureStatus">
                         Gesture recognition inactive
                     </div>
@@ -381,6 +426,8 @@
         const videoPlayer = document.getElementById('videoPlayer');
         const webcam = document.getElementById('webcam');
         const canvasOutput = document.getElementById('canvasOutput');
+        const thresholdCanvas = document.getElementById('thresholdCanvas');
+        const contourCanvas = document.getElementById('contourCanvas');
         const fileInput = document.getElementById('fileInput');
         const uploadBtn = document.getElementById('uploadBtn');
         const playPauseBtn = document.getElementById('playPauseBtn');
@@ -500,9 +547,17 @@
                 
                 // Set canvas dimensions to match video
                 webcam.addEventListener('loadedmetadata', () => {
-                    canvasOutput.width = webcam.videoWidth;
-                    canvasOutput.height = webcam.videoHeight;
-                    canvasOutput.style.display = 'block';
+                    const width = webcam.videoWidth;
+                    const height = webcam.videoHeight;
+                    
+                    canvasOutput.width = width;
+                    canvasOutput.height = height;
+                    
+                    thresholdCanvas.width = width;
+                    thresholdCanvas.height = height;
+                    
+                    contourCanvas.width = width;
+                    contourCanvas.height = height;
                 });
                 
                 // Wait for OpenCV to load
@@ -557,22 +612,26 @@
         }
 
         function processFrame(src) {
-            // Convert to grayscale
-            let gray = new cv.Mat();
-            cv.cvtColor(src, gray, cv.COLOR_RGBA2GRAY);
+            // Convert to HSV color space for better skin detection
+            let hsv = new cv.Mat();
+            cv.cvtColor(src, hsv, cv.COLOR_RGBA2RGB);
+            cv.cvtColor(hsv, hsv, cv.COLOR_RGB2HSV);
             
-            // Apply Gaussian blur to reduce noise
-            let blurred = new cv.Mat();
-            cv.GaussianBlur(gray, blurred, new cv.Size(5, 5), 0);
+            // Define skin color range in HSV
+            let low = new cv.Mat(hsv.rows, hsv.cols, hsv.type(), [0, 30, 60, 0]);
+            let high = new cv.Mat(hsv.rows, hsv.cols, hsv.type(), [20, 150, 255, 255]);
+            let mask = new cv.Mat();
+            cv.inRange(hsv, low, high, mask);
             
-            // Apply threshold to create binary image
-            let thresholded = new cv.Mat();
-            cv.threshold(blurred, thresholded, 0, 255, cv.THRESH_BINARY_INV + cv.THRESH_OTSU);
+            // Apply morphological operations to clean up the mask
+            let kernel = cv.Mat.ones(5, 5, cv.CV_8U);
+            cv.morphologyEx(mask, mask, cv.MORPH_OPEN, kernel);
+            cv.morphologyEx(mask, mask, cv.MORPH_CLOSE, kernel);
             
             // Find contours
             let contours = new cv.MatVector();
             let hierarchy = new cv.Mat();
-            cv.findContours(thresholded, contours, hierarchy, cv.RETR_EXTERNAL, cv.CHAIN_APPROX_SIMPLE);
+            cv.findContours(mask, contours, hierarchy, cv.RETR_EXTERNAL, cv.CHAIN_APPROX_SIMPLE);
             
             // Find the largest contour (likely the hand)
             let maxArea = 0;
@@ -598,6 +657,17 @@
                     y: rect.y + rect.height / 2
                 };
                 
+                // Calculate convex hull and defects for more advanced gesture recognition
+                let hull = new cv.Mat();
+                cv.convexHull(largestContour, hull, false, true);
+                
+                let defects = new cv.Mat();
+                let hullInt32 = new cv.Mat(hull.rows, hull.cols, cv.CV_32S);
+                for (let i = 0; i < hull.rows; i++) {
+                    hullInt32.data32S[i] = hull.data32S[i];
+                }
+                cv.convexityDefects(largestContour, hullInt32, defects);
+                
                 // Store hand position in history
                 handHistory.push(handCenter);
                 if (handHistory.length > 10) {
@@ -605,26 +675,42 @@
                 }
                 
                 // Detect gestures based on hand shape and movement
-                detectGestures(largestContour, rect, handCenter);
+                detectGestures(largestContour, rect, handCenter, defects);
                 
                 // Draw visualization on canvas
-                drawHandDetection(src, largestContour, rect, handCenter);
+                drawHandDetection(src, largestContour, rect, handCenter, hull, defects);
+                
+                // Draw threshold view
+                drawThresholdView(mask);
+                
+                // Draw contour view
+                drawContourView(mask, largestContour);
+                
+                // Clean up
+                hull.delete();
+                hullInt32.delete();
+                defects.delete();
             } else {
                 // Clear canvas if no hand detected
                 let ctx = canvasOutput.getContext('2d');
                 ctx.clearRect(0, 0, canvasOutput.width, canvasOutput.height);
                 ctx.drawImage(webcam, 0, 0, canvasOutput.width, canvasOutput.height);
+                
+                // Update debug info
+                debugInfo.textContent = "No hand detected. Make sure your hand is clearly visible with good lighting.";
             }
             
             // Clean up
-            gray.delete();
-            blurred.delete();
-            thresholded.delete();
+            hsv.delete();
+            low.delete();
+            high.delete();
+            mask.delete();
+            kernel.delete();
             contours.delete();
             hierarchy.delete();
         }
 
-        function detectGestures(contour, rect, handCenter) {
+        function detectGestures(contour, rect, handCenter, defects) {
             const now = Date.now();
             // Prevent too frequent gesture triggers
             if (now - lastGestureTime < GESTURE_COOLDOWN) return;
@@ -633,14 +719,37 @@
             let aspectRatio = rect.width / rect.height;
             let area = rect.width * rect.height;
             
-            // Detect gestures based on hand shape and movement
-            if (aspectRatio > 1.2 && area > 15000) {
-                // Wide hand - open hand gesture
+            // Calculate extent (contour area / bounding rect area)
+            let contourArea = cv.contourArea(contour);
+            let extent = contourArea / area;
+            
+            // Calculate solidity (contour area / convex hull area)
+            let hullArea = cv.contourArea(cv.convexHull(contour));
+            let solidity = contourArea / hullArea;
+            
+            // Count finger defects
+            let fingerCount = 0;
+            if (defects.rows > 0) {
+                for (let i = 0; i < defects.rows; i++) {
+                    let depth = defects.data32S[i * 4 + 3] / 256;
+                    if (depth > 20) { // Filter by depth to avoid noise
+                        fingerCount++;
+                    }
+                }
+                // Each defect represents a space between fingers, so fingers = defects + 1
+                fingerCount = Math.min(5, fingerCount + 1);
+            }
+            
+            // Update debug info
+            debugInfo.textContent = `Aspect: ${aspectRatio.toFixed(2)}, Area: ${area}, Fingers: ${fingerCount}, Extent: ${extent.toFixed(2)}, Solidity: ${solidity.toFixed(2)}`;
+            
+            // Detect gestures based on hand shape and finger count
+            if (fingerCount >= 4 && extent > 0.6) {
+                // Open hand with multiple fingers
                 triggerGesture('openHand');
                 lastGestureTime = now;
-            } else if (aspectRatio < 0.8 && area > 10000) {
-                // Tall hand - thumbs up/down
-                // Determine if it's thumbs up or down based on position
+            } else if (fingerCount === 1 && aspectRatio < 0.8) {
+                // Thumbs up/down (single finger, tall aspect ratio)
                 if (handCenter.y < canvasOutput.height / 2) {
                     triggerGesture('thumbsUp');
                 } else {
@@ -655,19 +764,19 @@
                 let deltaY = endPoint.y - startPoint.y;
                 
                 // Horizontal swipe (more horizontal than vertical movement)
-                if (Math.abs(deltaX) > Math.abs(deltaY) * 2) {
-                    if (deltaX > 50) {
+                if (Math.abs(deltaX) > Math.abs(deltaY) * 2 && Math.abs(deltaX) > 30) {
+                    if (deltaX > 0) {
                         triggerGesture('swipeRight');
                         lastGestureTime = now;
-                    } else if (deltaX < -50) {
+                    } else {
                         triggerGesture('swipeLeft');
                         lastGestureTime = now;
                     }
                 }
                 
                 // Vertical swipe (more vertical than horizontal movement)
-                if (Math.abs(deltaY) > Math.abs(deltaX) * 2) {
-                    if (deltaY > 50 && area > 12000) {
+                if (Math.abs(deltaY) > Math.abs(deltaX) * 2 && Math.abs(deltaY) > 30) {
+                    if (deltaY > 0 && area > 12000) {
                         triggerGesture('stop');
                         lastGestureTime = now;
                     }
@@ -676,7 +785,7 @@
         }
 
         function triggerGesture(gestureType) {
-            debugInfo.textContent = `Gesture detected: ${gestureType} at ${new Date().toLocaleTimeString()}`;
+            debugInfo.textContent += ` | Gesture: ${gestureType}`;
             
             switch(gestureType) {
                 case 'openHand':
@@ -711,7 +820,7 @@
             }
         }
 
-        function drawHandDetection(src, contour, rect, handCenter) {
+        function drawHandDetection(src, contour, rect, handCenter, hull, defects) {
             let ctx = canvasOutput.getContext('2d');
             
             // Clear canvas
@@ -725,6 +834,36 @@
             ctx.lineWidth = 2;
             ctx.strokeRect(rect.x, rect.y, rect.width, rect.height);
             
+            // Draw contour
+            ctx.strokeStyle = '#ff00ff';
+            ctx.lineWidth = 2;
+            ctx.beginPath();
+            for (let i = 0; i < contour.rows; i++) {
+                let point = contour.data32S.slice(i * 2, i * 2 + 2);
+                if (i === 0) {
+                    ctx.moveTo(point[0], point[1]);
+                } else {
+                    ctx.lineTo(point[0], point[1]);
+                }
+            }
+            ctx.closePath();
+            ctx.stroke();
+            
+            // Draw convex hull
+            ctx.strokeStyle = '#ffff00';
+            ctx.lineWidth = 2;
+            ctx.beginPath();
+            for (let i = 0; i < hull.rows; i++) {
+                let point = hull.data32S.slice(i * 2, i * 2 + 2);
+                if (i === 0) {
+                    ctx.moveTo(point[0], point[1]);
+                } else {
+                    ctx.lineTo(point[0], point[1]);
+                }
+            }
+            ctx.closePath();
+            ctx.stroke();
+            
             // Draw hand center
             ctx.fillStyle = '#ff0000';
             ctx.beginPath();
@@ -733,7 +872,7 @@
             
             // Draw hand history trail
             if (handHistory.length > 1) {
-                ctx.strokeStyle = '#ffff00';
+                ctx.strokeStyle = '#00ffff';
                 ctx.lineWidth = 2;
                 ctx.beginPath();
                 ctx.moveTo(handHistory[0].x, handHistory[0].y);
@@ -749,6 +888,26 @@
             ctx.fillStyle = 'white';
             ctx.font = '16px Arial';
             ctx.fillText('Show your hand to control the video', 10, 30);
+        }
+
+        function drawThresholdView(mask) {
+            let ctx = thresholdCanvas.getContext('2d');
+            let img = new cv.Mat();
+            cv.cvtColor(mask, img, cv.COLOR_GRAY2RGBA);
+            cv.imshow(thresholdCanvas, img);
+            img.delete();
+        }
+
+        function drawContourView(mask, contour) {
+            let ctx = contourCanvas.getContext('2d');
+            let img = new cv.Mat(mask.rows, mask.cols, cv.CV_8UC3, [0, 0, 0, 255]);
+            
+            // Draw the contour
+            let color = new cv.Scalar(0, 255, 0, 255);
+            cv.drawContours(img, [contour], 0, color, 2);
+            
+            cv.imshow(contourCanvas, img);
+            img.delete();
         }
 
         function showGestureFeedback(gestureName) {
