@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width,initial-scale=1" />
-<title>Gesture Video Player — Left/Right Pinch + Fist Controls</title>
+<title>Gesture Video Player — Custom Mappings</title>
 
 <!-- MediaPipe -->
 <script src="https://cdn.jsdelivr.net/npm/@mediapipe/hands/hands.js"></script>
@@ -36,8 +36,8 @@
 <body>
   <div class="container">
     <header>
-      <h1>Gesture Video Player — Left/Right Pinch & Fist Controls</h1>
-      <p>Left pinch → Volume · Right pinch → Seek · Single fist → Mute · Double fist → Unmute · Open hand → Play/Pause</p>
+      <h1>Gesture Video Player — Left/Right Pinch + Fist + Victory Toggle</h1>
+      <p>Double-fist: Mute/Unmute · Single-fist: Pause/Resume · Open-hand: Play · Pinch(L): Volume (high sensitivity) · Pinch(R): Seek · Victory: Toggle gestures</p>
     </header>
 
     <div class="main">
@@ -75,12 +75,12 @@
           <canvas id="landmarkCanvas" style="flex:1;min-width:140px;height:120px;"></canvas>
         </div>
 
-        <div id="gestureStatus" class="status">Gesture recognition inactive</div>
+        <div id="gestureStatus" class="status">Gesture recognition active</div>
         <div id="debug" class="debug">Initializing...</div>
       </div>
     </div>
 
-    <footer style="margin-top:12px;text-align:center;opacity:.9">Now: left/right pinch split + fist mute/unmute + open/ double-open</footer>
+    <footer style="margin-top:12px;text-align:center;opacity:.9">Gestures: ON</footer>
   </div>
 
   <div id="fsOverlay" class="overlay">
@@ -126,7 +126,7 @@ function changeVol(d){ videoPlayer.volume = Math.max(0, Math.min(1, videoPlayer.
 function seek(s){ if (isFinite(videoPlayer.duration)) videoPlayer.currentTime = Math.max(0, Math.min(videoPlayer.duration, videoPlayer.currentTime + s)); updateFeedback(); }
 function togglePlayPause(){ videoPlayer.paused?videoPlayer.play().catch(()=>{}):videoPlayer.pause(); updateFeedback(); }
 function toggleMute(){ videoPlayer.muted = !videoPlayer.muted; updateFeedback(); }
-function updateFeedback(){ feedbackEl.textContent = `Time: ${Math.round(videoPlayer.currentTime)}s / ${isFinite(videoPlayer.duration) ? Math.round(videoPlayer.duration)+'s':''} · Volume: ${Math.round(videoPlayer.volume*100)}% ${videoPlayer.muted?'(MUTED)':''}`; }
+function updateFeedback(){ feedbackEl.textContent = `Time: ${Math.round(videoPlayer.currentTime)}s · Volume: ${Math.round(videoPlayer.volume*100)}% ${videoPlayer.muted?'(MUTED)':''}`; }
 
 /* -------------------------
    MediaPipe + Gesture Logic
@@ -142,23 +142,21 @@ const landmarkCtx = landmarkCanvas.getContext('2d');
 let camera = null;
 let hands = null;
 
-/* cooldown for discrete gestures so they don't spam */
-const DISCRETE_COOLDOWN = 1000; // ms
+/* global toggles & cooldowns */
+let gesturesEnabled = true;
+const DISCRETE_COOLDOWN = 900; // ms for discrete actions
 let lastDiscreteTs = 0;
 function discreteCooldown(){ return (Date.now() - lastDiscreteTs) < DISCRETE_COOLDOWN; }
 
-/* wrist history for swipe detection (not used for primary seek; right pinch handles seek) */
+/* wrist history for fallback swipe */
 let wristHistory = [];
 const HISTORY_MAX = 12;
 const SWIPE_THRESHOLD = 80;
 
-/* Per-hand pinch states keyed by handedness label 'Left'|'Right' */
-let pinchState = {
-  Left: {active:false, start:null, last:null},   // volume control when Left pinched
-  Right: {active:false, start:null, last:null}   // seeking when Right pinched
-};
+/* pinch state per handedness */
+let pinchState = { Left: {active:false, start:null, last:null}, Right: {active:false, start:null, last:null} };
 
-/* utilities */
+/* helper: finger states */
 function fingerState(landmarks, handedness){
   if (!landmarks) return {extendedCount:0, thumbExt:false};
   const tips = [8,12,16,20];
@@ -176,11 +174,21 @@ function fingerState(landmarks, handedness){
   return {extendedCount:cnt, thumbExt:thumbExtended};
 }
 
+/* detect discrete labels */
 function inferDiscrete(landmarks, handedness){
   if (!landmarks) return null;
   const fs = fingerState(landmarks, handedness);
+  // Fist => all folded (no extended fingers & thumb not ext)
   if (fs.extendedCount === 0 && !fs.thumbExt) return 'fist';
+  // Open hand => all 4 fingers ext + thumb ext
   if (fs.extendedCount === 4 && fs.thumbExt) return 'openHand';
+  // Victory (V sign): exactly 2 extended fingers (index & middle) and thumb folded
+  if (fs.extendedCount === 2 && !fs.thumbExt){
+    // ensure which fingers are extended -> check index tip < pip and middle tip < pip
+    // (we already counted '2', but we can be slightly more strict by checking the tips)
+    return 'victory';
+  }
+  // Thumbs up/down (not primarily used now) still detect
   if (fs.thumbExt && fs.extendedCount <= 1) {
     if (landmarks[4].y < landmarks[0].y - 0.06) return 'thumbsUp';
     if (landmarks[4].y > landmarks[0].y + 0.06) return 'thumbsDown';
@@ -188,6 +196,7 @@ function inferDiscrete(landmarks, handedness){
   return null;
 }
 
+/* pinch computation */
 function computePinch(landmarks, width, height){
   const dx = (landmarks[4].x - landmarks[8].x) * width;
   const dy = (landmarks[4].y - landmarks[8].y) * height;
@@ -197,14 +206,21 @@ function computePinch(landmarks, width, height){
   return {dist, cx, cy};
 }
 
-/* map pinch distance to volume [0..1] */
-function pinchDistToVolume(dist){
-  const minD = 10, maxD = 160;
-  const norm = (dist - minD) / (maxD - minD);
+/* HIGH sensitivity mapping: small dist change => large volume change
+   map dist in [minD..maxD] -> volume [0..1] with a gentle exponent to amplify small changes:
+   use norm^0.6 or even linear with small minD..maxD to be very sensitive.
+*/
+function pinchDistToVolumeHighSensitivity(dist){
+  const minD = 5;   // very small
+  const maxD = 90;  // moderate width
+  const clamped = Math.max(minD, Math.min(maxD, dist));
+  let norm = (clamped - minD) / (maxD - minD); // 0..1
+  // amplify small changes: raise to power <1 -> larger slope near 0
+  norm = Math.pow(norm, 0.8); // 0.8 gives slightly higher sensitivity
   return Math.max(0, Math.min(1, norm));
 }
 
-/* central onResults handler */
+/* central handler */
 function onResults(results){
   if (!webcamElement.videoWidth) return;
   overlayCanvas.width = webcamElement.videoWidth;
@@ -218,147 +234,154 @@ function onResults(results){
   overlayCtx.clearRect(0,0,overlayCanvas.width,overlayCanvas.height);
   overlayCtx.drawImage(results.image, 0, 0, overlayCanvas.width, overlayCanvas.height);
 
-  // reset some status
-  gestureStatus.textContent = `Hands: ${results.multiHandLandmarks ? results.multiHandLandmarks.length : 0}`;
+  // show gesture state
+  gestureStatus.textContent = `GESTURES: ${gesturesEnabled ? 'ON' : 'OFF'} · Hands: ${results.multiHandLandmarks ? results.multiHandLandmarks.length : 0}`;
 
-  // if no hands -> reset pinch states
-  if (!results.multiHandLandmarks || results.multiHandLandmarks.length === 0){
-    // reset pinch states
-    for (const k of ['Left','Right']) {
-      if (pinchState[k].active) {
-        pinchState[k].active = false; pinchState[k].start = null; pinchState[k].last = null;
-      }
+  // if gestures disabled, just draw landmarks and return
+  if (!gesturesEnabled){
+    for (let i=0;i<results.multiHandLandmarks.length || 0;i++){
+      const lm = results.multiHandLandmarks[i];
+      window.drawConnectors(overlayCtx, lm, window.HAND_CONNECTIONS, {color:'#888', lineWidth:2});
+      window.drawLandmarks(overlayCtx, lm, {color:'#ccc', lineWidth:1});
     }
-    // shrink wrist history
+    overlayCtx.restore();
+    return;
+  }
+
+  // no hands -> reset pinches
+  if (!results.multiHandLandmarks || results.multiHandLandmarks.length === 0){
+    for (const k of ['Left','Right']) {
+      if (pinchState[k].active) { pinchState[k].active = false; pinchState[k].start = null; pinchState[k].last = null; }
+    }
     if (wristHistory.length > 0) wristHistory.shift();
     overlayCtx.restore();
     return;
   }
 
-  // draw landmarks visually
+  // draw connectors normally
   for (let i=0;i<results.multiHandLandmarks.length;i++){
-    const landmarks = results.multiHandLandmarks[i];
-    window.drawConnectors(overlayCtx, landmarks, window.HAND_CONNECTIONS, {color:'#00FF88', lineWidth:2});
-    window.drawLandmarks(overlayCtx, landmarks, {color:'#FFAA00', lineWidth:1});
+    const lm = results.multiHandLandmarks[i];
+    window.drawConnectors(overlayCtx, lm, window.HAND_CONNECTIONS, {color:'#00FF88', lineWidth:2});
+    window.drawLandmarks(overlayCtx, lm, {color:'#FFAA00', lineWidth:1});
   }
 
-  // Collect discrete gestures (fist/open) across hands to apply double-fist/unmute and double-open/fullscreen
-  let discretePerHand = []; // {label, discrete}
+  // collect discrete for double-fist/double-open detection
+  let per = [];
   for (let i=0;i<results.multiHandLandmarks.length;i++){
     const lm = results.multiHandLandmarks[i];
     const handed = (results.multiHandedness && results.multiHandedness[i] && results.multiHandedness[i].label) ? results.multiHandedness[i].label : 'Right';
     const discrete = inferDiscrete(lm, handed);
-    discretePerHand.push({handed, discrete, landmarks:lm});
+    per.push({handed, discrete, landmarks:lm});
   }
 
-  // 1) Double-fist (both hands fist) => Unmute
-  if (discretePerHand.length >= 2) {
-    const bothFist = discretePerHand.every(h => h.discrete === 'fist');
-    if (bothFist && !discreteCooldown()){
-      lastDiscreteTs = Date.now();
-      videoPlayer.muted = false;
-      gestureStatus.textContent = 'Double Fist → Unmute';
-      feedbackEl.textContent = 'Unmuted';
-      updateFeedback();
-      overlayCtx.restore();
-      return;
-    }
-  }
-
-  // 2) Single fist (exactly one hand fist) => Mute
-  const fistHands = discretePerHand.filter(h => h.discrete === 'fist');
-  if (fistHands.length === 1 && !discreteCooldown()){
+  // VICTORY toggles gestures ON/OFF (single hand victory or either hand)
+  const victoryDetected = per.some(p => p.discrete === 'victory');
+  if (victoryDetected && !discreteCooldown()){
+    // toggle gestures
+    gesturesEnabled = !gesturesEnabled;
     lastDiscreteTs = Date.now();
-    videoPlayer.muted = true;
-    gestureStatus.textContent = 'Single Fist → Mute';
-    feedbackEl.textContent = 'Muted';
+    gestureStatus.textContent = `GESTURES: ${gesturesEnabled ? 'ON' : 'OFF'} (toggled by V sign)`;
+    feedbackEl.textContent = gesturesEnabled ? 'Gestures ENABLED' : 'Gestures DISABLED';
+    overlayCtx.restore();
+    return;
+  }
+
+  // Double-fist -> toggle mute/unmute
+  if (per.length >= 2 && per.every(p=>p.discrete === 'fist') && !discreteCooldown()){
+    lastDiscreteTs = Date.now();
+    videoPlayer.muted = !videoPlayer.muted;
+    gestureStatus.textContent = videoPlayer.muted ? 'Muted (Double Fist)' : 'Unmuted (Double Fist)';
+    feedbackEl.textContent = videoPlayer.muted ? 'Muted' : 'Unmuted';
     updateFeedback();
     overlayCtx.restore();
     return;
   }
 
-  // 3) Double open => Fullscreen
-  const bothOpen = discretePerHand.length >= 2 && discretePerHand.every(h => h.discrete === 'openHand');
-  if (bothOpen && !discreteCooldown()){
+  // Single-fist -> Pause/Resume toggle
+  if (per.length === 1 && per[0].discrete === 'fist' && !discreteCooldown()){
     lastDiscreteTs = Date.now();
-    gestureStatus.textContent = 'Double Open → Fullscreen';
-    feedbackEl.textContent = 'Fullscreen';
-    enterFullscreenFromGesture();
+    if (!videoPlayer.paused) { videoPlayer.pause(); gestureStatus.textContent = 'Single Fist → Paused'; feedbackEl.textContent = 'Paused'; }
+    else { videoPlayer.play().catch(()=>{}); gestureStatus.textContent = 'Single Fist → Playing'; feedbackEl.textContent = 'Playing'; }
+    updateFeedback();
     overlayCtx.restore();
     return;
   }
 
-  // For single-hand open -> Play/Pause (only when exactly one hand visible)
-  if (discretePerHand.length === 1 && discretePerHand[0].discrete === 'openHand' && !discreteCooldown()){
+  // Double-open -> fullscreen AND play
+  if (per.length >=2 && per.every(p=>p.discrete === 'openHand') && !discreteCooldown()){
     lastDiscreteTs = Date.now();
-    gestureStatus.textContent = 'Single Open → Play/Pause';
-    togglePlayPause();
-    feedbackEl.textContent = 'Play/Pause toggled';
+    gestureStatus.textContent = 'Double Open → Fullscreen & Play';
+    feedbackEl.textContent = 'Fullscreen & Play';
+    fsOverlay.style.display = 'block';
+    fullscreenVideo.src = videoPlayer.currentSrc || videoPlayer.src;
+    fullscreenVideo.currentTime = videoPlayer.currentTime;
+    fullscreenVideo.play().catch(()=>{});
     overlayCtx.restore();
     return;
   }
 
-  // Now handle per-hand pinch behavior (priority)
-  // For each detected hand, check pinch and handedness label to apply left/right mapping
+  // Single open-hand -> Play
+  if (per.length === 1 && per[0].discrete === 'openHand' && !discreteCooldown()){
+    lastDiscreteTs = Date.now();
+    videoPlayer.play().catch(()=>{});
+    gestureStatus.textContent = 'Open Hand → Play';
+    feedbackEl.textContent = 'Play';
+    updateFeedback();
+    overlayCtx.restore();
+    return;
+  }
+
+  // Handle pinches per hand (priority)
   for (let i=0;i<results.multiHandLandmarks.length;i++){
-    const landmarks = results.multiHandLandmarks[i];
+    const lm = results.multiHandLandmarks[i];
     const handed = (results.multiHandedness && results.multiHandedness[i] && results.multiHandedness[i].label) ? results.multiHandedness[i].label : 'Right';
-    const pinch = computePinch(landmarks, overlayCanvas.width, overlayCanvas.height);
-    const PINCH_THRESHOLD = 45; // px
+    const pinch = computePinch(lm, overlayCanvas.width, overlayCanvas.height);
+    const PINCH_THRESHOLD = 50; // px for detection; we keep moderate threshold
 
-    // If this hand's pinch dist < threshold -> pinched
     if (pinch.dist < PINCH_THRESHOLD){
-      // activate/continue pinch for this handedness
+      // start or continue pinch
       const state = pinchState[handed];
       if (!state.active){
-        // start pinch
         state.active = true;
         state.start = {dist: pinch.dist, cx: pinch.cx, cy: pinch.cy, t: Date.now(), videoTime: videoPlayer.currentTime, volume: videoPlayer.volume};
         state.last = {dist: pinch.dist, cx: pinch.cx, cy: pinch.cy};
-        gestureStatus.textContent = `${handed} hand PINCH started`;
+        gestureStatus.textContent = `${handed} PINCH started`;
         feedbackEl.textContent = `${handed} pinch start`;
       } else {
-        // continue pinch
+        // continue
         const dx = pinch.cx - state.start.cx;
-        // LEFT pinch => volume control using pinch distance
         if (handed === 'Left'){
-          const vol = pinchDistToVolume(pinch.dist);
+          // HIGH sensitivity: small dist change => large volume change
+          const vol = pinchDistToVolumeHighSensitivity(pinch.dist);
           videoPlayer.volume = vol;
           feedbackEl.textContent = `Left Pinch → Volume ${Math.round(vol*100)}%`;
           gestureStatus.textContent = `Left Pinch (volume)`;
-        }
-        // RIGHT pinch => seeking horizontally while pinched
-        else if (handed === 'Right'){
-          // map dx -> seconds (tweakable)
-          const seekPxToSec = 0.08; // px -> seconds
+        } else {
+          // Right pinch -> seeking horizontally while pinched
+          const seekPxToSec = 0.12; // slightly higher sensitivity for seeking
           const delta = dx * seekPxToSec;
           const target = Math.max(0, Math.min(videoPlayer.duration || 1, state.start.videoTime + delta));
           videoPlayer.currentTime = target;
-          feedbackEl.textContent = `Right Pinch → Seek to ${Math.round(target)}s`;
+          feedbackEl.textContent = `Right Pinch → Seek ${Math.round(target)}s`;
           gestureStatus.textContent = `Right Pinch (seek)`;
         }
         state.last = {dist: pinch.dist, cx: pinch.cx, cy: pinch.cy};
       }
-      // after handling pinch for this hand, continue loop to check other hands
     } else {
-      // not pinched => if previous pinch was active, end it (release)
+      // not pinched: if was active, release
       const state = pinchState[handed];
       if (state.active){
-        state.active = false;
-        // small feedback on release
+        state.active = false; state.start = null; state.last = null;
         feedbackEl.textContent = `${handed} pinch released`;
         gestureStatus.textContent = 'Gesture active';
-        // small cooldown to avoid immediate discrete triggers
-        lastDiscreteTs = Date.now();
+        lastDiscreteTs = Date.now(); // small cooldown after release
       }
     }
-  } // end per-hand loop
+  }
 
-  // If not pinched (both not active), we can also detect swipe (optional). But per request, right-hand pinch handles seeking.
-  // For robustness, also implement a fallback swipe detection (only when no pinches):
-  const anyPinchActive = pinchState.Left.active || pinchState.Right.active;
-  if (!anyPinchActive){
-    // maintain wrist history of primary hand (first)
+  // If no pinches active, fallback swipe detection for seek
+  const anyPinch = pinchState.Left.active || pinchState.Right.active;
+  if (!anyPinch){
     try {
       const primary = results.multiHandLandmarks[0];
       const wristX = primary[0].x * overlayCanvas.width;
@@ -368,31 +391,31 @@ function onResults(results){
         const dx = wristHistory[wristHistory.length-1] - wristHistory[0];
         if (Math.abs(dx) > SWIPE_THRESHOLD){
           lastDiscreteTs = Date.now();
-          if (dx > 0){
-            seek(10);
-            gestureStatus.textContent = 'Swipe Right → +10s';
-            feedbackEl.textContent = '+10s';
-          } else {
-            seek(-10);
-            gestureStatus.textContent = 'Swipe Left → -10s';
-            feedbackEl.textContent = '-10s';
-          }
+          if (dx > 0){ seek(10); gestureStatus.textContent = 'Swipe Right → +10s'; feedbackEl.textContent = '+10s'; }
+          else { seek(-10); gestureStatus.textContent = 'Swipe Left → -10s'; feedbackEl.textContent = '-10s'; }
           wristHistory = [];
         }
       }
     } catch(e){}
   }
 
-  // Debug + feedback
-  debug.textContent = `Hands:${results.multiHandLandmarks.length} · LeftPinch:${pinchState.Left.active} · RightPinch:${pinchState.Right.active} · Vol:${Math.round(videoPlayer.volume*100)}% · Time:${Math.round(videoPlayer.currentTime)}s`;
+  // debug text
+  debug.textContent = `Hands:${results.multiHandLandmarks.length} · Lpinch:${pinchState.Left.active} · Rpinch:${pinchState.Right.active} · Vol:${Math.round(videoPlayer.volume*100)}% · Time:${Math.round(videoPlayer.currentTime)}s`;
 
   overlayCtx.restore();
   updateFeedback();
-} // end onResults
+}
 
 /* helpers used above */
-function enterFullscreenFromGesture(){ fsOverlay.style.display='block'; fullscreenVideo.src = videoPlayer.currentSrc || videoPlayer.src; fullscreenVideo.currentTime = videoPlayer.currentTime; if(!videoPlayer.paused) fullscreenVideo.play().catch(()=>{}); }
-function updateFeedback(){ document.getElementById('gestureFeedback').textContent = `Time:${Math.round(videoPlayer.currentTime)}s Vol:${Math.round(videoPlayer.volume*100)}% ${videoPlayer.muted?'(MUTED)':''}`; }
+function pinchDistToVolumeHighSensitivity(dist){
+  const minD = 5, maxD = 90;
+  const clamped = Math.max(minD, Math.min(maxD, dist));
+  let norm = (clamped - minD) / (maxD - minD);
+  norm = Math.pow(norm, 0.8);
+  return Math.max(0, Math.min(1, norm));
+}
+function enterFullscreenFromGesture(){ fsOverlay.style.display='block'; fullscreenVideo.src = videoPlayer.currentSrc || videoPlayer.src; fullscreenVideo.currentTime = videoPlayer.currentTime; fullscreenVideo.play().catch(()=>{}); }
+function updateFeedback(){ document.getElementById('gestureFeedback').textContent = `Time:${Math.round(videoPlayer.currentTime)}s · Vol:${Math.round(videoPlayer.volume*100)}% ${videoPlayer.muted?'(MUTED)':''}`; }
 
 /* Initialize MediaPipe Hands */
 async function initMediaPipe(){
@@ -424,7 +447,7 @@ async function initMediaPipe(){
   }
 }
 
-/* start on load */
+/* Start */
 window.addEventListener('load', ()=>{
   webcamElement.addEventListener('loadeddata', ()=>{
     overlayCanvas.width = webcamElement.videoWidth;
@@ -436,11 +459,15 @@ window.addEventListener('load', ()=>{
 /* cleanup */
 window.addEventListener('beforeunload', ()=>{ try{ if (camera) camera.stop(); }catch(e){} });
 
-/* small UI helpers */
+/* UI helpers */
 function changeVol(d){ videoPlayer.volume = Math.max(0, Math.min(1, videoPlayer.volume + d)); updateFeedback(); }
 function seek(s){ if (isFinite(videoPlayer.duration)) videoPlayer.currentTime = Math.max(0, Math.min(videoPlayer.duration, videoPlayer.currentTime + s)); updateFeedback(); }
 function togglePlayPause(){ videoPlayer.paused?videoPlayer.play().catch(()=>{}):videoPlayer.pause(); updateFeedback(); }
+
+/* Manual victory-key: press 'v' to toggle gestures (like V sign) — handy for testing without performing the physical sign */
+window.addEventListener('keydown', (e) => {
+  if (e.key.toLowerCase() === 'v') { gesturesEnabled = !gesturesEnabled; gestureStatus.textContent = `GESTURES: ${gesturesEnabled ? 'ON' : 'OFF'} (keyboard)`; feedbackEl.textContent = gesturesEnabled ? 'Gestures ENABLED' : 'Gestures DISABLED'; }
+});
 </script>
 </body>
 </html>
-
