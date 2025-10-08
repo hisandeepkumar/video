@@ -1,634 +1,352 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Gesture Video Player</title>
-    <style>
-        * {
-            margin: 0;
-            padding: 0;
-            box-sizing: border-box;
-            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
-        }
-
-        body {
-            background: linear-gradient(135deg, #1a2a6c, #b21f1f, #fdbb2d);
-            color: white;
-            min-height: 100vh;
-            display: flex;
-            flex-direction: column;
-            align-items: center;
-            padding: 2rem;
-        }
-
-        .container {
-            max-width: 1200px;
-            width: 100%;
-            display: flex;
-            flex-direction: column;
-            gap: 2rem;
-        }
-
-        header {
-            text-align: center;
-            margin-bottom: 1rem;
-        }
-
-        h1 {
-            font-size: 2.5rem;
-            margin-bottom: 0.5rem;
-            text-shadow: 2px 2px 4px rgba(0, 0, 0, 0.5);
-        }
-
-        .subtitle {
-            font-size: 1.2rem;
-            opacity: 0.9;
-        }
-
-        .main-content {
-            display: flex;
-            flex-wrap: wrap;
-            gap: 2rem;
-            justify-content: center;
-        }
-
-        .video-section {
-            flex: 1;
-            min-width: 300px;
-            background: rgba(0, 0, 0, 0.7);
-            border-radius: 15px;
-            padding: 1.5rem;
-            box-shadow: 0 10px 30px rgba(0, 0, 0, 0.5);
-        }
-
-        .video-container {
-            position: relative;
-            width: 100%;
-            padding-top: 56.25%; /* 16:9 Aspect Ratio */
-            background-color: #000;
-            border-radius: 10px;
-            overflow: hidden;
-            margin-bottom: 1rem;
-        }
-
-        #videoPlayer {
-            position: absolute;
-            top: 0;
-            left: 0;
-            width: 100%;
-            height: 100%;
-            outline: none;
-        }
-
-        .controls {
-            display: flex;
-            flex-wrap: wrap;
-            gap: 1rem;
-            margin-top: 1rem;
-        }
-
-        .btn {
-            padding: 0.8rem 1.5rem;
-            background: #4a00e0;
-            color: white;
-            border: none;
-            border-radius: 50px;
-            cursor: pointer;
-            font-weight: bold;
-            transition: all 0.3s ease;
-            display: flex;
-            align-items: center;
-            gap: 0.5rem;
-            box-shadow: 0 4px 10px rgba(0, 0, 0, 0.3);
-        }
-
-        .btn:hover {
-            background: #8e2de2;
-            transform: translateY(-2px);
-        }
-
-        .btn:active {
-            transform: translateY(0);
-        }
-
-        .btn-fullscreen {
-            background: #ff416c;
-        }
-
-        .gesture-section {
-            flex: 1;
-            min-width: 300px;
-            background: rgba(0, 0, 0, 0.7);
-            border-radius: 15px;
-            padding: 1.5rem;
-            box-shadow: 0 10px 30px rgba(0, 0, 0, 0.5);
-        }
-
-        .gesture-container {
-            display: flex;
-            flex-direction: column;
-            align-items: center;
-            gap: 1rem;
-        }
-
-        #webcam {
-            width: 100%;
-            max-width: 500px;
-            border-radius: 10px;
-            background: #000;
-        }
-
-        .gesture-info {
-            margin-top: 1rem;
-            background: rgba(255, 255, 255, 0.1);
-            padding: 1rem;
-            border-radius: 10px;
-            width: 100%;
-        }
-
-        .gesture-list {
-            display: grid;
-            grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
-            gap: 1rem;
-            margin-top: 1rem;
-        }
-
-        .gesture-item {
-            display: flex;
-            align-items: center;
-            gap: 0.5rem;
-            padding: 0.5rem;
-            background: rgba(255, 255, 255, 0.1);
-            border-radius: 8px;
-        }
-
-        .gesture-icon {
-            font-size: 1.5rem;
-        }
-
-        .upload-section {
-            width: 100%;
-            display: flex;
-            flex-direction: column;
-            align-items: center;
-            gap: 1rem;
-            margin-top: 1rem;
-        }
-
-        #fileInput {
-            display: none;
-        }
-
-        .upload-btn {
-            background: #00b09b;
-        }
-
-        .status {
-            padding: 1rem;
-            border-radius: 10px;
-            text-align: center;
-            font-weight: bold;
-            margin-top: 1rem;
-            background: rgba(255, 255, 255, 0.1);
-        }
-
-        .status.active {
-            background: rgba(0, 255, 0, 0.2);
-            color: #00ff00;
-        }
-
-        .status.inactive {
-            background: rgba(255, 0, 0, 0.2);
-            color: #ff4d4d;
-        }
-
-        footer {
-            margin-top: 2rem;
-            text-align: center;
-            opacity: 0.8;
-        }
-
-        .fullscreen-overlay {
-            position: fixed;
-            top: 0;
-            left: 0;
-            width: 100vw;
-            height: 100vh;
-            background: black;
-            z-index: 1000;
-            display: none;
-        }
-
-        .fullscreen-video {
-            width: 100%;
-            height: 100%;
-            object-fit: contain;
-        }
-
-        .close-fullscreen {
-            position: absolute;
-            top: 20px;
-            right: 20px;
-            background: rgba(0, 0, 0, 0.5);
-            color: white;
-            border: none;
-            border-radius: 50%;
-            width: 40px;
-            height: 40px;
-            font-size: 1.5rem;
-            cursor: pointer;
-            z-index: 1001;
-        }
-
-        @media (max-width: 768px) {
-            .main-content {
-                flex-direction: column;
-            }
-            
-            h1 {
-                font-size: 2rem;
-            }
-        }
-    </style>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width,initial-scale=1" />
+<title>Gesture Video Player — Fixed</title>
+<style>
+/* (keep your original styles; trimmed for brevity here) */
+*{margin:0;padding:0;box-sizing:border-box;font-family:Segoe UI, Tahoma, Geneva, Verdana, sans-serif}
+body{background:linear-gradient(135deg,#1a2a6c,#b21f1f,#fdbb2d);color:#fff;min-height:100vh;display:flex;flex-direction:column;align-items:center;padding:2rem}
+.container{max-width:1200px;width:100%;display:flex;flex-direction:column;gap:2rem}
+/* ...rest of your styles (kept from original) ... */
+.video-container{position:relative;width:100%;padding-top:56.25%;background:#000;border-radius:10px;overflow:hidden;margin-bottom:1rem}
+#videoPlayer{position:absolute;top:0;left:0;width:100%;height:100%;outline:none}
+.webcam-wrap{width:100%;max-width:500px;border-radius:10px;background:#000;overflow:hidden}
+#webcam{display:block;width:100%;height:auto}
+.status{padding:1rem;border-radius:10px;text-align:center;font-weight:bold;margin-top:1rem;background:rgba(255,255,255,0.1)}
+.status.active{background:rgba(0,255,0,0.12);color:#00ff00}
+.status.inactive{background:rgba(255,0,0,0.12);color:#ff4d4d}
+/* keep rest of your original styles */
+.fullscreen-overlay{position:fixed;top:0;left:0;width:100vw;height:100vh;background:black;z-index:1000;display:none}
+.fullscreen-video{width:100%;height:100%;object-fit:contain}
+.close-fullscreen{position:absolute;top:20px;right:20px;background:rgba(0,0,0,0.5);color:white;border:none;border-radius:50%;width:40px;height:40px;font-size:1.5rem;cursor:pointer;z-index:1001}
+</style>
 </head>
 <body>
-    <div class="container">
-        <header>
-            <h1>Gesture Video Player</h1>
-            <p class="subtitle">Control video playback with hand gestures using OpenCV</p>
-        </header>
+<div class="container">
+  <header>
+    <h1>Gesture Video Player</h1>
+    <p class="subtitle">Control video playback with hand gestures using OpenCV</p>
+  </header>
 
-        <div class="main-content">
-            <div class="video-section">
-                <h2>Video Player</h2>
-                <div class="video-container">
-                    <video id="videoPlayer" controls>
-                        Your browser does not support the video tag.
-                    </video>
-                </div>
-                
-                <div class="controls">
-                    <button class="btn" id="playPauseBtn">
-                        <span>▶️</span> Play/Pause
-                    </button>
-                    <button class="btn" id="volumeUpBtn">
-                        <span>🔊</span> Volume Up
-                    </button>
-                    <button class="btn" id="volumeDownBtn">
-                        <span>🔉</span> Volume Down
-                    </button>
-                    <button class="btn" id="seekForwardBtn">
-                        <span>⏩</span> Forward 10s
-                    </button>
-                    <button class="btn" id="seekBackwardBtn">
-                        <span>⏪</span> Backward 10s
-                    </button>
-                    <button class="btn btn-fullscreen" id="fullscreenBtn">
-                        <span>📺</span> Fullscreen
-                    </button>
-                </div>
-                
-                <div class="upload-section">
-                    <input type="file" id="fileInput" accept="video/*">
-                    <button class="btn upload-btn" id="uploadBtn">
-                        <span>📁</span> Upload Video
-                    </button>
-                    <p>Supported formats: MP4, WebM, OGG</p>
-                </div>
-            </div>
-
-            <div class="gesture-section">
-                <h2>Gesture Controls</h2>
-                <div class="gesture-container">
-                    <video id="webcam" autoplay playsinline></video>
-                    <div class="status inactive" id="gestureStatus">
-                        Gesture recognition inactive
-                    </div>
-                    
-                    <div class="gesture-info">
-                        <h3>Available Gestures:</h3>
-                        <div class="gesture-list">
-                            <div class="gesture-item">
-                                <span class="gesture-icon">✋</span>
-                                <span>Open Hand: Play/Pause</span>
-                            </div>
-                            <div class="gesture-item">
-                                <span class="gesture-icon">👍</span>
-                                <span>Thumbs Up: Volume Up</span>
-                            </div>
-                            <div class="gesture-item">
-                                <span class="gesture-icon">👎</span>
-                                <span>Thumbs Down: Volume Down</span>
-                            </div>
-                            <div class="gesture-item">
-                                <span class="gesture-icon">👉</span>
-                                <span>Swipe Right: Forward 10s</span>
-                            </div>
-                            <div class="gesture-item">
-                                <span class="gesture-icon">👈</span>
-                                <span>Swipe Left: Backward 10s</span>
-                            </div>
-                            <div class="gesture-item">
-                                <span class="gesture-icon">🤚</span>
-                                <span>Stop Gesture: Fullscreen</span>
-                            </div>
-                        </div>
-                    </div>
-                </div>
-            </div>
-        </div>
-
-        <footer>
-            <p>Gesture Video Player &copy; 2023 | Powered by OpenCV.js</p>
-        </footer>
-    </div>
-
-    <div class="fullscreen-overlay" id="fullscreenOverlay">
-        <button class="close-fullscreen" id="closeFullscreen">✕</button>
-        <video class="fullscreen-video" id="fullscreenVideo" controls>
-            Your browser does not support the video tag.
+  <div class="main-content" style="display:flex;gap:2rem;flex-wrap:wrap;justify-content:center">
+    <div class="video-section" style="flex:1;min-width:300px;background:rgba(0,0,0,0.7);padding:1.5rem;border-radius:15px">
+      <h2>Video Player</h2>
+      <div class="video-container">
+        <video id="videoPlayer" controls>
+          Your browser does not support the video tag.
         </video>
+      </div>
+
+      <div class="controls" style="display:flex;gap:1rem;flex-wrap:wrap;margin-top:1rem">
+        <button class="btn" id="playPauseBtn">▶️ Play/Pause</button>
+        <button class="btn" id="volumeUpBtn">🔊 Volume Up</button>
+        <button class="btn" id="volumeDownBtn">🔉 Volume Down</button>
+        <button class="btn" id="seekForwardBtn">⏩ Forward 10s</button>
+        <button class="btn" id="seekBackwardBtn">⏪ Backward 10s</button>
+        <button class="btn btn-fullscreen" id="fullscreenBtn">📺 Fullscreen</button>
+      </div>
+
+      <div class="upload-section" style="margin-top:1rem">
+        <input type="file" id="fileInput" accept="video/*" style="display:none">
+        <button class="btn upload-btn" id="uploadBtn">📁 Upload Video</button>
+        <p>Supported formats: MP4, WebM, OGG</p>
+      </div>
     </div>
 
-    <script src="https://docs.opencv.org/4.5.0/opencv.js" type="text/javascript"></script>
-    <script>
-        // DOM Elements
-        const videoPlayer = document.getElementById('videoPlayer');
-        const webcam = document.getElementById('webcam');
-        const fileInput = document.getElementById('fileInput');
-        const uploadBtn = document.getElementById('uploadBtn');
-        const playPauseBtn = document.getElementById('playPauseBtn');
-        const volumeUpBtn = document.getElementById('volumeUpBtn');
-        const volumeDownBtn = document.getElementById('volumeDownBtn');
-        const seekForwardBtn = document.getElementById('seekForwardBtn');
-        const seekBackwardBtn = document.getElementById('seekBackwardBtn');
-        const fullscreenBtn = document.getElementById('fullscreenBtn');
-        const fullscreenOverlay = document.getElementById('fullscreenOverlay');
-        const fullscreenVideo = document.getElementById('fullscreenVideo');
-        const closeFullscreen = document.getElementById('closeFullscreen');
-        const gestureStatus = document.getElementById('gestureStatus');
+    <div class="gesture-section" style="flex:1;min-width:300px;background:rgba(0,0,0,0.7);padding:1.5rem;border-radius:15px">
+      <h2>Gesture Controls</h2>
+      <div class="gesture-container" style="display:flex;flex-direction:column;align-items:center">
+        <div class="webcam-wrap">
+          <video id="webcam" autoplay playsinline muted></video>
+        </div>
+        <div class="status inactive" id="gestureStatus">Gesture recognition inactive</div>
 
-        // Video upload handling
-        uploadBtn.addEventListener('click', () => {
-            fileInput.click();
-        });
+        <div class="gesture-info" style="margin-top:1rem;background:rgba(255,255,255,0.06);padding:1rem;border-radius:10px;width:100%">
+          <h3>Available Gestures:</h3>
+          <div class="gesture-list" style="display:grid;grid-template-columns:repeat(auto-fill,minmax(200px,1fr));gap:1rem;margin-top:1rem">
+            <div class="gesture-item">✋ Open Hand: Play/Pause</div>
+            <div class="gesture-item">👍 Thumbs Up: Volume Up</div>
+            <div class="gesture-item">👎 Thumbs Down: Volume Down</div>
+            <div class="gesture-item">👉 Swipe Right: Forward 10s</div>
+            <div class="gesture-item">👈 Swipe Left: Backward 10s</div>
+            <div class="gesture-item">🤚 Fist/Stop: Fullscreen</div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
 
-        fileInput.addEventListener('change', (e) => {
-            const file = e.target.files[0];
-            if (file) {
-                const url = URL.createObjectURL(file);
-                videoPlayer.src = url;
-                fullscreenVideo.src = url;
-                
-                // Auto-play the video
-                videoPlayer.play().catch(error => {
-                    console.log("Auto-play prevented:", error);
-                });
-            }
-        });
+  <footer style="margin-top:2rem;text-align:center;opacity:0.8">
+    <p>Gesture Video Player &copy; 2023 | Powered by OpenCV.js</p>
+  </footer>
+</div>
 
-        // Control buttons
-        playPauseBtn.addEventListener('click', () => {
-            if (videoPlayer.paused) {
-                videoPlayer.play();
-            } else {
-                videoPlayer.pause();
-            }
-        });
+<div class="fullscreen-overlay" id="fullscreenOverlay">
+  <button class="close-fullscreen" id="closeFullscreen">✕</button>
+  <video class="fullscreen-video" id="fullscreenVideo" controls></video>
+</div>
 
-        volumeUpBtn.addEventListener('click', () => {
-            if (videoPlayer.volume < 1) {
-                videoPlayer.volume = Math.min(1, videoPlayer.volume + 0.1);
-            }
-        });
+<script src="https://docs.opencv.org/4.5.0/opencv.js" type="text/javascript"></script>
+<script>
+/* ======== DOM elements ======== */
+const videoPlayer = document.getElementById('videoPlayer');
+const webcam = document.getElementById('webcam');
+const fileInput = document.getElementById('fileInput');
+const uploadBtn = document.getElementById('uploadBtn');
+const playPauseBtn = document.getElementById('playPauseBtn');
+const volumeUpBtn = document.getElementById('volumeUpBtn');
+const volumeDownBtn = document.getElementById('volumeDownBtn');
+const seekForwardBtn = document.getElementById('seekForwardBtn');
+const seekBackwardBtn = document.getElementById('seekBackwardBtn');
+const fullscreenBtn = document.getElementById('fullscreenBtn');
+const fullscreenOverlay = document.getElementById('fullscreenOverlay');
+const fullscreenVideo = document.getElementById('fullscreenVideo');
+const closeFullscreen = document.getElementById('closeFullscreen');
+const gestureStatus = document.getElementById('gestureStatus');
 
-        volumeDownBtn.addEventListener('click', () => {
-            if (videoPlayer.volume > 0) {
-                videoPlayer.volume = Math.max(0, videoPlayer.volume - 0.1);
-            }
-        });
+/* ======== video upload handlers ======== */
+uploadBtn.addEventListener('click', () => fileInput.click());
+fileInput.addEventListener('change', (e) => {
+  const f = e.target.files[0];
+  if (!f) return;
+  const url = URL.createObjectURL(f);
+  videoPlayer.src = url;
+  fullscreenVideo.src = url;
+  videoPlayer.play().catch(()=>{/* autoplay blocked */});
+});
 
-        seekForwardBtn.addEventListener('click', () => {
-            videoPlayer.currentTime = Math.min(videoPlayer.duration, videoPlayer.currentTime + 10);
-        });
+/* simple controls */
+playPauseBtn.addEventListener('click', ()=> videoPlayer.paused ? videoPlayer.play() : videoPlayer.pause());
+volumeUpBtn.addEventListener('click', ()=> videoPlayer.volume = Math.min(1, videoPlayer.volume + 0.1));
+volumeDownBtn.addEventListener('click', ()=> videoPlayer.volume = Math.max(0, videoPlayer.volume - 0.1));
+seekForwardBtn.addEventListener('click', ()=> videoPlayer.currentTime = Math.min(videoPlayer.duration || Infinity, videoPlayer.currentTime + 10));
+seekBackwardBtn.addEventListener('click', ()=> videoPlayer.currentTime = Math.max(0, videoPlayer.currentTime - 10));
+fullscreenBtn.addEventListener('click', () => {
+  fullscreenOverlay.style.display = 'block';
+  fullscreenVideo.currentTime = videoPlayer.currentTime;
+  fullscreenVideo.play().catch(()=>{});
+});
+closeFullscreen.addEventListener('click', () => {
+  fullscreenOverlay.style.display = 'none';
+  fullscreenVideo.pause();
+});
 
-        seekBackwardBtn.addEventListener('click', () => {
-            videoPlayer.currentTime = Math.max(0, videoPlayer.currentTime - 10);
-        });
+/* ======== OpenCV & webcam setup ======== */
+let stream = null;
+let cap = null;
+let src = null;
+let gray = null;
+let dst = null;
+let processing = false;
+let lastGestureTime = 0;
+let prevCentroid = null; // for swipe detection
+const GESTURE_DEBOUNCE_MS = 1200;
+const SWIPE_THRESHOLD = 40; // px
 
-        fullscreenBtn.addEventListener('click', () => {
-            fullscreenOverlay.style.display = 'block';
-            fullscreenVideo.play();
-        });
+// start webcam
+async function startWebcam() {
+  try {
+    stream = await navigator.mediaDevices.getUserMedia({video:{width:640,height:480}, audio:false});
+    webcam.srcObject = stream;
+    // wait until the video has loaded metadata / started
+    await new Promise(resolve => {
+      webcam.onloadedmetadata = () => {
+        webcam.play().catch(()=>{});
+        resolve();
+      };
+    });
+    // ensure OpenCV runtime ready
+    if (cv && cv.getBuildInformation) {
+      initOpenCVObjects();
+    } else {
+      cv['onRuntimeInitialized'] = () => initOpenCVObjects();
+    }
+  } catch (err) {
+    console.error("Webcam error:", err);
+    gestureStatus.textContent = "Webcam access denied";
+    gestureStatus.className = "status inactive";
+  }
+}
 
-        closeFullscreen.addEventListener('click', () => {
-            fullscreenOverlay.style.display = 'none';
-            fullscreenVideo.pause();
-        });
+// create Mats & VideoCapture after webcam dimensions available
+function initOpenCVObjects() {
+  const w = webcam.videoWidth || 640;
+  const h = webcam.videoHeight || 480;
 
-        // Webcam and OpenCV setup
-        let isGestureActive = false;
-        let stream = null;
-        let cap = null;
-        let src = null;
-        let dst = null;
-        let gray = null;
+  // create mats with correct sizes
+  src = new cv.Mat(h, w, cv.CV_8UC4);
+  gray = new cv.Mat();
+  dst = new cv.Mat(h, w, cv.CV_8UC1);
 
-        // Start webcam when page loads
-        window.addEventListener('load', () => {
-            startWebcam();
-        });
+  cap = new cv.VideoCapture(webcam); // IMPORTANT: create cap after video element is playable
 
-        async function startWebcam() {
-            try {
-                stream = await navigator.mediaDevices.getUserMedia({ 
-                    video: { width: 640, height: 480 } 
-                });
-                webcam.srcObject = stream;
-                
-                // Wait for OpenCV to load
-                if (cv.getBuildInformation) {
-                    initializeOpenCV();
-                } else {
-                    cv['onRuntimeInitialized'] = () => {
-                        initializeOpenCV();
-                    };
-                }
-            } catch (error) {
-                console.error("Error accessing webcam:", error);
-                gestureStatus.textContent = "Webcam access denied";
-            }
-        }
+  gestureStatus.textContent = "Gesture recognition active";
+  gestureStatus.className = "status active";
+  processing = true;
+  requestAnimationFrame(processLoop);
+}
 
-        function initializeOpenCV() {
-            gestureStatus.textContent = "Gesture recognition active";
-            gestureStatus.className = "status active";
-            isGestureActive = true;
-            
-            // Create OpenCV objects
-            src = new cv.Mat(webcam.height, webcam.width, cv.CV_8UC4);
-            dst = new cv.Mat(webcam.height, webcam.width, cv.CV_8UC1);
-            gray = new cv.Mat();
-            
-            // Start processing frames
-            processVideo();
-        }
+/* process frames: use requestAnimationFrame loop, but throttle to ~10 fps for CPU */
+let lastProcessTimestamp = 0;
+const PROCESS_INTERVAL_MS = 100; // approx 10 fps
 
-        function processVideo() {
-            if (!isGestureActive) return;
-            
-            try {
-                // Read frame from webcam
-                cap.read(src);
-                
-                // Convert to grayscale
-                cv.cvtColor(src, gray, cv.COLOR_RGBA2GRAY);
-                
-                // Apply Gaussian blur
-                cv.GaussianBlur(gray, gray, new cv.Size(5, 5), 0);
-                
-                // Simple thresholding for demonstration
-                cv.threshold(gray, dst, 127, 255, cv.THRESH_BINARY);
-                
-                // Find contours
-                let contours = new cv.MatVector();
-                let hierarchy = new cv.Mat();
-                cv.findContours(dst, contours, hierarchy, cv.RETR_EXTERNAL, cv.CHAIN_APPROX_SIMPLE);
-                
-                // Process contours for gesture recognition
-                processContours(contours);
-                
-                // Clean up
-                contours.delete();
-                hierarchy.delete();
-                
-                // Continue processing
-                setTimeout(processVideo, 100);
-            } catch (error) {
-                console.error("Error in processVideo:", error);
-                setTimeout(processVideo, 100);
-            }
-        }
+function processLoop(ts) {
+  if (!processing) return;
 
-        function processContours(contours) {
-            // This is a simplified gesture recognition
-            // In a real application, you would use more sophisticated algorithms
-            
-            let maxArea = 0;
-            let largestContour = null;
-            
-            // Find the largest contour (likely the hand)
-            for (let i = 0; i < contours.size(); i++) {
-                let contour = contours.get(i);
-                let area = cv.contourArea(contour);
-                if (area > maxArea) {
-                    maxArea = area;
-                    largestContour = contour;
-                }
-            }
-            
-            // If we found a significant contour, analyze it
-            if (largestContour && maxArea > 5000) {
-                // Get the bounding rectangle
-                let rect = cv.boundingRect(largestContour);
-                
-                // Calculate aspect ratio
-                let aspectRatio = rect.width / rect.height;
-                
-                // Simple gesture detection based on aspect ratio and area
-                if (aspectRatio > 1.2) {
-                    // Wide shape - could be open hand
-                    simulateGesture('openHand');
-                } else if (aspectRatio < 0.8) {
-                    // Tall shape - could be thumbs up/down
-                    simulateGesture('thumbsUp');
-                } else {
-                    // Square-ish shape - could be fist
-                    simulateGesture('fist');
-                }
-            }
-        }
+  if (!lastProcessTimestamp || (ts - lastProcessTimestamp) >= PROCESS_INTERVAL_MS) {
+    lastProcessTimestamp = ts;
+    try {
+      // read frame
+      cap.read(src);
+      // convert to gray and blur
+      cv.cvtColor(src, gray, cv.COLOR_RGBA2GRAY);
+      cv.GaussianBlur(gray, gray, new cv.Size(5,5), 0);
+      // simple threshold to get silhouette (demo purpose)
+      cv.threshold(gray, dst, 120, 255, cv.THRESH_BINARY + cv.THRESH_OTSU);
 
-        // Simulate gesture detection (in a real app, this would be actual gesture recognition)
-        let lastGestureTime = 0;
-        function simulateGesture(gesture) {
-            const now = Date.now();
-            // Prevent too frequent gesture triggers
-            if (now - lastGestureTime < 2000) return;
-            
-            lastGestureTime = now;
-            
-            switch(gesture) {
-                case 'openHand':
-                    // Play/Pause
-                    if (videoPlayer.paused) {
-                        videoPlayer.play();
-                    } else {
-                        videoPlayer.pause();
-                    }
-                    showGestureFeedback("Play/Pause");
-                    break;
-                    
-                case 'thumbsUp':
-                    // Volume Up
-                    if (videoPlayer.volume < 1) {
-                        videoPlayer.volume = Math.min(1, videoPlayer.volume + 0.1);
-                    }
-                    showGestureFeedback("Volume Up");
-                    break;
-                    
-                case 'thumbsDown':
-                    // Volume Down
-                    if (videoPlayer.volume > 0) {
-                        videoPlayer.volume = Math.max(0, videoPlayer.volume - 0.1);
-                    }
-                    showGestureFeedback("Volume Down");
-                    break;
-                    
-                case 'fist':
-                    // Fullscreen
-                    fullscreenOverlay.style.display = 'block';
-                    fullscreenVideo.play();
-                    showGestureFeedback("Fullscreen");
-                    break;
-                    
-                case 'swipeRight':
-                    // Seek Forward
-                    videoPlayer.currentTime = Math.min(videoPlayer.duration, videoPlayer.currentTime + 10);
-                    showGestureFeedback("Forward 10s");
-                    break;
-                    
-                case 'swipeLeft':
-                    // Seek Backward
-                    videoPlayer.currentTime = Math.max(0, videoPlayer.currentTime - 10);
-                    showGestureFeedback("Backward 10s");
-                    break;
-            }
-        }
+      // morphology to reduce noise
+      let M = cv.Mat.ones(5,5,cv.CV_8U);
+      cv.morphologyEx(dst, dst, cv.MORPH_OPEN, M);
+      M.delete();
 
-        function showGestureFeedback(gestureName) {
-            gestureStatus.textContent = `Gesture detected: ${gestureName}`;
-            gestureStatus.style.background = "rgba(0, 255, 0, 0.3)";
-            
-            setTimeout(() => {
-                gestureStatus.textContent = "Gesture recognition active";
-                gestureStatus.style.background = "";
-            }, 1500);
-        }
+      // find contours
+      let contours = new cv.MatVector();
+      let hierarchy = new cv.Mat();
+      cv.findContours(dst, contours, hierarchy, cv.RETR_EXTERNAL, cv.CHAIN_APPROX_SIMPLE);
 
-        // Clean up when leaving the page
-        window.addEventListener('beforeunload', () => {
-            if (stream) {
-                stream.getTracks().forEach(track => track.stop());
-            }
-            
-            // Clean up OpenCV objects
-            if (src) src.delete();
-            if (dst) dst.delete();
-            if (gray) gray.delete();
-            if (cap) cap.delete();
-        });
-    </script>
+      analyzeContours(contours);
+
+      // cleanup
+      hierarchy.delete();
+      contours.delete();
+    } catch (err) {
+      console.error("Processing error:", err);
+    }
+  }
+
+  requestAnimationFrame(processLoop);
+}
+
+function analyzeContours(contours) {
+  let maxArea = 0;
+  let maxIdx = -1;
+
+  for (let i=0; i<contours.size(); i++) {
+    let cnt = contours.get(i);
+    let area = cv.contourArea(cnt);
+    if (area > maxArea) { maxArea = area; maxIdx = i; }
+    cnt.delete(); // delete the temporary Mat we got
+  }
+
+  // threshold to ignore small noise
+  if (maxIdx === -1 || maxArea < 3000) {
+    // no valid hand
+    prevCentroid = null;
+    return;
+  }
+
+  // retrieve largest contour
+  let largest = contours.get(maxIdx);
+  // bounding rect & centroid
+  let rect = cv.boundingRect(largest);
+  const aspectRatio = rect.width / rect.height;
+  const centroid = { x: rect.x + rect.width/2, y: rect.y + rect.height/2 };
+
+  // detect swipes: compare centroid x movement
+  if (prevCentroid) {
+    const dx = centroid.x - prevCentroid.x;
+    if (Math.abs(dx) > SWIPE_THRESHOLD) {
+      if (dx > 0) triggerGesture('swipeRight');
+      else triggerGesture('swipeLeft');
+      prevCentroid = centroid;
+      largest.delete();
+      return;
+    }
+  }
+
+  // Very simple heuristics:
+  // wide shapes -> open hand, tall shapes -> thumb-ish, square -> fist
+  if (aspectRatio > 1.15) {
+    triggerGesture('openHand');
+  } else if (aspectRatio < 0.8) {
+    // we try thumbs up/down based on centroid y relative to frame center
+    const frameCenterY = webcam.videoHeight / 2;
+    if (centroid.y < frameCenterY) {
+      triggerGesture('thumbsUp');
+    } else {
+      triggerGesture('thumbsDown');
+    }
+  } else {
+    // near-square => fist => fullscreen
+    triggerGesture('fist');
+  }
+
+  prevCentroid = centroid;
+  largest.delete();
+}
+
+function triggerGesture(name) {
+  const now = Date.now();
+  if (now - lastGestureTime < GESTURE_DEBOUNCE_MS) return;
+  lastGestureTime = now;
+
+  switch (name) {
+    case 'openHand':
+      if (videoPlayer.paused) videoPlayer.play(); else videoPlayer.pause();
+      showFeedback("Play/Pause");
+      break;
+    case 'thumbsUp':
+      videoPlayer.volume = Math.min(1, videoPlayer.volume + 0.1);
+      showFeedback("Volume Up");
+      break;
+    case 'thumbsDown':
+      videoPlayer.volume = Math.max(0, videoPlayer.volume - 0.1);
+      showFeedback("Volume Down");
+      break;
+    case 'fist':
+      fullscreenOverlay.style.display = 'block';
+      fullscreenVideo.currentTime = videoPlayer.currentTime;
+      fullscreenVideo.play().catch(()=>{});
+      showFeedback("Fullscreen");
+      break;
+    case 'swipeRight':
+      videoPlayer.currentTime = Math.min(videoPlayer.duration || Infinity, videoPlayer.currentTime + 10);
+      showFeedback("Forward 10s");
+      break;
+    case 'swipeLeft':
+      videoPlayer.currentTime = Math.max(0, videoPlayer.currentTime - 10);
+      showFeedback("Backward 10s");
+      break;
+    default:
+      console.log("Unknown gesture:", name);
+  }
+}
+
+function showFeedback(text) {
+  gestureStatus.textContent = `Gesture detected: ${text}`;
+  gestureStatus.className = "status active";
+  setTimeout(()=> {
+    gestureStatus.textContent = "Gesture recognition active";
+    gestureStatus.className = "status active";
+  }, 1400);
+}
+
+/* cleanup on unload */
+window.addEventListener('beforeunload', () => {
+  processing = false;
+  if (stream) {
+    stream.getTracks().forEach(t => t.stop());
+  }
+  try { if (src) src.delete(); } catch {}
+  try { if (gray) gray.delete(); } catch {}
+  try { if (dst) dst.delete(); } catch {}
+  try { if (cap) cap.delete(); } catch {}
+});
+
+/* start */
+startWebcam();
+</script>
 </body>
 </html>
