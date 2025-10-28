@@ -2,7 +2,7 @@
 <html lang="hi">
 <head>
 <meta charset="utf-8">
-<title>Gesture Video Player – Fixed Camera</title>
+<title>Gesture Video Player – Volume + Seek (Horizontal Pinch)</title>
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <script src="https://cdn.jsdelivr.net/npm/@mediapipe/hands/hands.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.js"></script>
@@ -16,7 +16,7 @@
   .controls{display:flex;gap:8px;margin-top:12px;flex-wrap:wrap}
   .btn{padding:8px 14px;border-radius:999px;background:#4a00e0;color:#fff;border:none;cursor:pointer;font-weight:700}
   .btn.full{background:#ff416c}
-  #webcam{width:1px;height:1px;opacity:0;position:absolute;pointer-events:none} /* छुपाया, लेकिन DOM में है */
+  #webcam{width:1px;height:1px;opacity:0;position:absolute;pointer-events:none}
   canvas{width:100%;max-width:560px;border-radius:8px;background:#000}
   .status,.feedback{margin-top:8px;padding:8px;border-radius:8px;background:rgba(255,255,255,.06);text-align:center}
   .toggleBtn{font-weight:700;padding:10px 16px;border-radius:8px;margin-top:8px;display:inline-block}
@@ -46,7 +46,6 @@
   <div class="toggleBtn" id="manualToggle" style="background:#ff416c;cursor:pointer">Manual Toggle</div>
 </div>
 
-<!-- यही video element MediaPipe को चाहिए -->
 <video id="webcam" autoplay playsinline></video>
 
 <script>
@@ -65,7 +64,7 @@ upload.onclick = ()=>fileIn.click();
 fileIn.onchange = e=>{
   const f = e.target.files[0];
   if(!f) return;
-  video.src = URL.createObjectObjectURL(f);
+  video.src = URL.createObjectURL(f);
   video.play().catch(()=>{});
 };
 
@@ -91,7 +90,7 @@ function setGestures(state){
 manualToggle.onclick = () => setGestures(!GESTURES_ENABLED);
 
 /* ---------- MEDIAPIPE ---------- */
-const webcam = document.getElementById('webcam');  // अब DOM में है
+const webcam = document.getElementById('webcam');
 const canvas = document.getElementById('canvas');
 const ctx    = canvas.getContext('2d');
 let hands, camera;
@@ -123,11 +122,6 @@ function pinchDist(lm,w,h){
   const dist=Math.hypot(dx,dy);
   const cx=(lm[4].x+lm[8].x)/2*w;
   return {dist,cx};
-}
-function volFromDist(d){
-  const min=20, max=200;
-  const c = Math.max(min,Math.min(max,d));
-  return (c-min)/(max-min);
 }
 
 function onResults(res){
@@ -192,7 +186,7 @@ function onResults(res){
     }
   }
 
-  /* Pinch */
+  /* ---------- PINCH: SEEK & VOLUME (HORIZONTAL MOVEMENT) ---------- */
   for(let i=0;i<res.multiHandLandmarks.length;i++){
     const lm   = res.multiHandLandmarks[i];
     const hand = (res.multiHandedness?.[i]?.label) ?? 'Right';
@@ -203,19 +197,32 @@ function onResults(res){
     if(p.dist < TH){
       if(!st.active){
         st.active = true;
-        st.start  = {dist:p.dist, cx:p.cx, t:Date.now(), time:video.currentTime, vol:video.volume};
-        st.last   = {dist:p.dist, cx:p.cx};
+        st.start  = {cx:p.cx, t:Date.now(), time:video.currentTime, vol:video.volume};
+        st.last   = {cx:p.cx};
+        status.textContent = `${hand} pinch start`;
       }else{
         const elapsed = Date.now() - st.start.t;
         if(elapsed > HOLD_MS){
           const dx = p.cx - st.start.cx;
-          const seekSec = dx * 0.08;
-          const target = Math.max(0,Math.min(video.duration,st.start.time + seekSec));
-          video.currentTime = target;
-          feedback.textContent = `Seek ${Math.round(target)}s`;
-          status.textContent = `${hand} pinch → seek`;
+          const sensitivity = 0.08; // एक जैसी फील के लिए
+
+          if(hand === 'Right'){
+            // SEEK
+            const seekSec = dx * sensitivity;
+            const target = Math.max(0, Math.min(video.duration, st.start.time + seekSec));
+            video.currentTime = target;
+            feedback.textContent = `Seek ${Math.round(target)}s`;
+            status.textContent = `Right pinch → seek`;
+          } else {
+            // VOLUME
+            const volDelta = dx * 0.002; // 0-1 range में
+            const newVol = Math.max(0, Math.min(1, st.start.vol + volDelta));
+            video.volume = newVol;
+            feedback.textContent = `Volume ${Math.round(newVol*100)}%`;
+            status.textContent = `Left pinch → volume`;
+          }
         }
-        st.last = {dist:p.dist, cx:p.cx};
+        st.last = {cx:p.cx};
       }
     }else{
       if(st.active){
@@ -228,10 +235,6 @@ function onResults(res){
             else{ seek(10); feedback.textContent='+10s'; }
             tapTs[hand]=0;
           }else tapTs[hand]=now;
-        }else{
-          const vol = volFromDist(st.last.dist);
-          video.volume = vol;
-          feedback.textContent = `Volume ${Math.round(vol*100)}%`;
         }
         st.active=false; st.start=null; st.last=null;
         lastAct = Date.now();
