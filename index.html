@@ -35,7 +35,7 @@
   <div class="container">
     <header>
       <h1>Gesture Video Player — Updated Mappings</h1>
-      <p>Left Open + Right Fist: Pause · Right Open + Left Fist: Play · Right Open: Pause · Left Open: Play · Right Double Tap (Pinch): +10s · Left Double Tap (Pinch): -10s · Victory: Toggle gestures</p>
+      <p>Left Open + Right Fist: Pause · Right Open + Left Fist: Play · Right Open: Pause · Left Open: Play · Right Double Tap (Index+Thumb): +10s · Left Double Tap (Index+Thumb): -10s · Left Pinch Hold+Move: Seek · Right Pinch Hold: Volume Control</p>
     </header>
     <div class="main">
       <div class="card" style="flex:1;min-width:320px;max-width:640px">
@@ -62,15 +62,10 @@
         <h3>Webcam & Gestures</h3>
         <video id="webcam" autoplay playsinline muted></video>
         <canvas id="overlayCanvas"></canvas>
-        <div style="display:flex;gap:8px;margin-top:8px">
-          <canvas id="thumbCanvas" style="flex:1;min-width:140px;height:120px;"></canvas>
-          <canvas id="landmarkCanvas" style="flex:1;min-width:140px;height:120px;"></canvas>
-        </div>
         <div id="gestureStatus" class="status">Gesture recognition active</div>
         <div id="debug" class="debug">Initializing...</div>
       </div>
     </div>
-    <footer style="margin-top:12px;text-align:center;opacity:.9">Gestures: ON</footer>
   </div>
   <div id="fsOverlay" class="overlay">
     <button id="closeFs" class="closeBtn">✕</button>
@@ -117,21 +112,17 @@ function updateFeedback(){ feedbackEl.textContent = `Time: ${Math.round(videoPla
 const webcamElement = document.getElementById('webcam');
 const overlayCanvas = document.getElementById('overlayCanvas');
 const overlayCtx = overlayCanvas.getContext('2d');
-const thumbCanvas = document.getElementById('thumbCanvas');
-const thumbCtx = thumbCanvas.getContext('2d');
-const landmarkCanvas = document.getElementById('landmarkCanvas');
-const landmarkCtx = landmarkCanvas.getContext('2d');
 let camera = null;
 let hands = null;
 /* global toggles & cooldowns */
-let gesturesEnabled = true;
 const DISCRETE_COOLDOWN = 900; // ms for discrete actions
 let lastDiscreteTs = 0;
 function discreteCooldown(){ return (Date.now() - lastDiscreteTs) < DISCRETE_COOLDOWN; }
 /* pinch state per handedness */
 let pinchState = { Left: {active:false, start:null, last:null}, Right: {active:false, start:null, last:null} };
-let pinchPressTs = { Left: 0, Right: 0 };
-const DOUBLE_TAP_WINDOW = 600; // ms for double tap detection
+let pinchTapTs = { Left: 0, Right: 0 };
+const SHORT_DURATION = 300; // ms to distinguish tap from hold
+const DOUBLE_TAP_WINDOW = 600; // ms for double tap
 /* helper: finger states */
 function fingerState(landmarks, handedness){
   if (!landmarks) return {extendedCount:0, thumbExt:false};
@@ -157,12 +148,6 @@ function inferDiscrete(landmarks, handedness){
   if (fs.extendedCount === 0 && !fs.thumbExt) return 'fist';
   // Open hand => all 4 fingers ext + thumb ext
   if (fs.extendedCount === 4 && fs.thumbExt) return 'openHand';
-  // Victory (V sign): exactly 2 extended fingers (index & middle) and thumb folded
-  if (fs.extendedCount === 2 && !fs.thumbExt){
-    // ensure which fingers are extended -> check index tip < pip and middle tip < pip
-    // (we already counted '2', but we can be slightly more strict by checking the tips)
-    return 'victory';
-  }
   // Thumbs up/down (not primarily used now) still detect
   if (fs.thumbExt && fs.extendedCount <= 1) {
     if (landmarks[4].y < landmarks[0].y - 0.06) return 'thumbsUp';
@@ -179,30 +164,24 @@ function computePinch(landmarks, width, height){
   const cy = (landmarks[4].y + landmarks[8].y)/2 * height;
   return {dist, cx, cy};
 }
+/* volume mapping: linear for accuracy */
+function pinchDistToVolume(dist){
+  const minD = 20;
+  const maxD = 200;
+  const clamped = Math.max(minD, Math.min(maxD, dist));
+  const norm = (clamped - minD) / (maxD - minD);
+  return Math.max(0, Math.min(1, norm));
+}
 /* central handler */
 function onResults(results){
   if (!webcamElement.videoWidth) return;
   overlayCanvas.width = webcamElement.videoWidth;
   overlayCanvas.height = webcamElement.videoHeight;
-  thumbCanvas.width = webcamElement.videoWidth;
-  thumbCanvas.height = webcamElement.videoHeight;
-  landmarkCanvas.width = webcamElement.videoWidth;
-  landmarkCanvas.height = webcamElement.videoHeight;
   overlayCtx.save();
   overlayCtx.clearRect(0,0,overlayCanvas.width,overlayCanvas.height);
   overlayCtx.drawImage(results.image, 0, 0, overlayCanvas.width, overlayCanvas.height);
   // show gesture state
-  gestureStatus.textContent = `GESTURES: ${gesturesEnabled ? 'ON' : 'OFF'} · Hands: ${results.multiHandLandmarks ? results.multiHandLandmarks.length : 0}`;
-  // if gestures disabled, just draw landmarks and return
-  if (!gesturesEnabled){
-    for (let i=0;i<results.multiHandLandmarks.length || 0;i++){
-      const lm = results.multiHandLandmarks[i];
-      window.drawConnectors(overlayCtx, lm, window.HAND_CONNECTIONS, {color:'#888', lineWidth:2});
-      window.drawLandmarks(overlayCtx, lm, {color:'#ccc', lineWidth:1});
-    }
-    overlayCtx.restore();
-    return;
-  }
+  gestureStatus.textContent = `Hands: ${results.multiHandLandmarks ? results.multiHandLandmarks.length : 0}`;
   // no hands -> reset pinches
   if (!results.multiHandLandmarks || results.multiHandLandmarks.length === 0){
     for (const k of ['Left','Right']) {
@@ -224,17 +203,6 @@ function onResults(results){
     const handed = (results.multiHandedness && results.multiHandedness[i] && results.multiHandedness[i].label) ? results.multiHandedness[i].label : 'Right';
     const discrete = inferDiscrete(lm, handed);
     per.push({handed, discrete, landmarks:lm});
-  }
-  // VICTORY toggles gestures ON/OFF (single hand victory or either hand)
-  const victoryDetected = per.some(p => p.discrete === 'victory');
-  if (victoryDetected && !discreteCooldown()){
-    // toggle gestures
-    gesturesEnabled = !gesturesEnabled;
-    lastDiscreteTs = Date.now();
-    gestureStatus.textContent = `GESTURES: ${gesturesEnabled ? 'ON' : 'OFF'} (toggled by V sign)`;
-    feedbackEl.textContent = gesturesEnabled ? 'Gestures ENABLED' : 'Gestures DISABLED';
-    overlayCtx.restore();
-    return;
   }
   // Handle discrete gestures if no pinch active
   const anyPinch = pinchState.Left.active || pinchState.Right.active;
@@ -282,7 +250,7 @@ function onResults(results){
       }
     }
   }
-  // Handle pinches per hand for double tap
+  // Handle pinches per hand
   for (let i=0;i<results.multiHandLandmarks.length;i++){
     const lm = results.multiHandLandmarks[i];
     const handed = (results.multiHandedness && results.multiHandedness[i] && results.multiHandedness[i].label) ? results.multiHandedness[i].label : 'Right';
@@ -295,30 +263,54 @@ function onResults(results){
         state.active = true;
         state.start = {dist: pinch.dist, cx: pinch.cx, cy: pinch.cy, t: Date.now(), videoTime: videoPlayer.currentTime, volume: videoPlayer.volume};
         state.last = {dist: pinch.dist, cx: pinch.cx, cy: pinch.cy};
-        // Detect double tap on press
-        const now = Date.now();
-        if (now - pinchPressTs[handed] < DOUBLE_TAP_WINDOW && !discreteCooldown()) {
-          lastDiscreteTs = now;
-          if (handed === 'Left') {
-            seek(-10);
-            gestureStatus.textContent = `${handed} Double Tap → -10s`;
-            feedbackEl.textContent = '-10s';
-          } else {
-            seek(10);
-            gestureStatus.textContent = `${handed} Double Tap → +10s`;
-            feedbackEl.textContent = '+10s';
-          }
-          pinchPressTs[handed] = 0; // reset
-        } else {
-          pinchPressTs[handed] = now;
-        }
+        gestureStatus.textContent = `${handed} PINCH started`;
+        feedbackEl.textContent = `${handed} pinch start`;
       } else {
-        // continue pinch - no continuous action, just hold
+        // continue: update continuous if held long enough
+        if (Date.now() - state.start.t > SHORT_DURATION) {
+          const dx = pinch.cx - state.start.cx;
+          if (handed === 'Left') {
+            // Left pinch: seek with horizontal move
+            const seekPxToSec = 0.08; // finer control
+            const delta = dx * seekPxToSec;
+            const target = Math.max(0, Math.min(videoPlayer.duration || 1, state.start.videoTime + delta));
+            videoPlayer.currentTime = target;
+            feedbackEl.textContent = `Left Pinch → Seek ${Math.round(target)}s`;
+            gestureStatus.textContent = `Left Pinch (seek)`;
+          } else {
+            // Right pinch: volume with dist
+            const vol = pinchDistToVolume(pinch.dist);
+            videoPlayer.volume = vol;
+            feedbackEl.textContent = `Right Pinch → Volume ${Math.round(vol*100)}%`;
+            gestureStatus.textContent = `Right Pinch (volume)`;
+          }
+        }
         state.last = {dist: pinch.dist, cx: pinch.cx, cy: pinch.cy};
       }
     } else {
       // not pinched: if was active, release
       if (state.active){
+        const now = Date.now();
+        const duration = now - state.start.t;
+        if (duration < SHORT_DURATION) {
+          // it's a tap
+          if (now - pinchTapTs[handed] < DOUBLE_TAP_WINDOW && !discreteCooldown()) {
+            // double tap
+            lastDiscreteTs = now;
+            if (handed === 'Left') {
+              seek(-10);
+              gestureStatus.textContent = `${handed} Double Tap → -10s`;
+              feedbackEl.textContent = '-10s';
+            } else {
+              seek(10);
+              gestureStatus.textContent = `${handed} Double Tap → +10s`;
+              feedbackEl.textContent = '+10s';
+            }
+            pinchTapTs[handed] = 0; // reset
+          } else {
+            pinchTapTs[handed] = now;
+          }
+        }
         state.active = false; state.start = null; state.last = null;
         feedbackEl.textContent = `${handed} pinch released`;
         gestureStatus.textContent = 'Gesture active';
@@ -370,10 +362,6 @@ window.addEventListener('beforeunload', ()=>{ try{ if (camera) camera.stop(); }c
 function changeVol(d){ videoPlayer.volume = Math.max(0, Math.min(1, videoPlayer.volume + d)); updateFeedback(); }
 function seek(s){ if (isFinite(videoPlayer.duration)) videoPlayer.currentTime = Math.max(0, Math.min(videoPlayer.duration, videoPlayer.currentTime + s)); updateFeedback(); }
 function togglePlayPause(){ videoPlayer.paused?videoPlayer.play().catch(()=>{}):videoPlayer.pause(); updateFeedback(); }
-/* Manual victory-key: press 'v' to toggle gestures (like V sign) — handy for testing without performing the physical sign */
-window.addEventListener('keydown', (e) => {
-  if (e.key.toLowerCase() === 'v') { gesturesEnabled = !gesturesEnabled; gestureStatus.textContent = `GESTURES: ${gesturesEnabled ? 'ON' : 'OFF'} (keyboard)`; feedbackEl.textContent = gesturesEnabled ? 'Gestures ENABLED' : 'Gestures DISABLED'; }
-});
 </script>
 </body>
 </html>
