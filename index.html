@@ -130,13 +130,9 @@ const canvas = document.getElementById('canvas');
 const ctx    = canvas.getContext('2d');
 let hands, camera;
 
-const COOLDOWN = 1200; // after action
-let lastAct = 0;
-function cooldown(){ return Date.now()-lastAct < COOLDOWN; }
-
-// Simplified gesture detection variables
-let gestureStartTime = {}; // {gestureKey: timestamp}
-const HOLD_THRESHOLD = 1000; // 1 second hold
+// Cooldown to prevent multiple triggers
+let lastGestureTime = 0;
+const COOLDOWN = 500; // 0.5 seconds
 
 function fingerState(lm, hand){
   const tips=[8,12,16,20], pips=[6,10,14,18];
@@ -169,7 +165,6 @@ function onResults(res){
   ctx.setTransform(1,0,0,1,0,0);
 
   if(!res.multiHandLandmarks || res.multiHandLandmarks.length===0){
-    gestureStartTime = {};
     ctx.restore(); return;
   }
 
@@ -192,65 +187,83 @@ function onResults(res){
     handsInfo.push({hand: mirroredHand, disc, lm});
   }
 
-  // Reset gesture timer if not holding
-  const currentGestures = handsInfo.map(h => `${h.hand}_${h.disc}`).join('_');
-  if(currentGestures !== Object.keys(gestureStartTime).join('_')){
-    gestureStartTime = {};
+  // Check cooldown
+  const now = Date.now();
+  if(now - lastGestureTime < COOLDOWN){
+    ctx.restore(); return;
   }
 
-  // === SIMPLE GESTURE DETECTION ===
+  // === SIMPLE GESTURE DETECTION - IMMEDIATE ACTION ===
   
-  // 1. LEFT HAND OPEN → PLAY
-  if(handsInfo.length === 1 && !cooldown()){
+  // 1. LEFT HAND OPEN → PLAY (IMMEDIATE)
+  if(handsInfo.length === 1){
     const h = handsInfo[0];
     if(h.hand==='Left' && h.disc==='openHand'){
-      const key = 'left_open';
-      if(!gestureStartTime[key]) gestureStartTime[key] = Date.now();
-      if(Date.now() - gestureStartTime[key] >= HOLD_THRESHOLD){
-        lastAct = Date.now();
-        video.play().catch(()=>{});
-        status.textContent='Left Open → Play';
-        feedback.textContent='Playing';
-        upd();
-        gestureStartTime = {};
-      }
+      lastGestureTime = now;
+      video.play().catch(()=>{});
+      status.textContent='Left Open → Play';
+      feedback.textContent='Playing';
+      upd();
       ctx.restore(); return;
     }
   }
 
-  // 2. RIGHT HAND OPEN → PAUSE
-  if(handsInfo.length === 1 && !cooldown()){
+  // 2. RIGHT HAND OPEN → PAUSE (IMMEDIATE)
+  if(handsInfo.length === 1){
     const h = handsInfo[0];
     if(h.hand==='Right' && h.disc==='openHand'){
-      const key = 'right_open';
-      if(!gestureStartTime[key]) gestureStartTime[key] = Date.now();
-      if(Date.now() - gestureStartTime[key] >= HOLD_THRESHOLD){
-        lastAct = Date.now();
-        video.pause();
-        status.textContent='Right Open → Pause';
-        feedback.textContent='Paused';
-        upd();
-        gestureStartTime = {};
-      }
+      lastGestureTime = now;
+      video.pause();
+      status.textContent='Right Open → Pause';
+      feedback.textContent='Paused';
+      upd();
       ctx.restore(); return;
     }
   }
 
-  // 3. BOTH FISTS → FULLSCREEN TOGGLE
-  if(handsInfo.length === 2 && !cooldown()){
+  // 3. BOTH FISTS → FULLSCREEN TOGGLE (IMMEDIATE)
+  if(handsInfo.length === 2){
     const L = handsInfo.find(h=>h.hand==='Left');
     const R = handsInfo.find(h=>h.hand==='Right');
     if(L && R && L.disc==='fist' && R.disc==='fist'){
-      const key = 'both_fists';
-      if(!gestureStartTime[key]) gestureStartTime[key] = Date.now();
-      if(Date.now() - gestureStartTime[key] >= HOLD_THRESHOLD){
-        lastAct = Date.now();
-        if(fsOverlay.style.display === 'flex') exitFullscreen();
-        else enterFullscreen();
-        status.textContent = 'Both Fists → Fullscreen Toggle';
-        gestureStartTime = {};
-      }
+      lastGestureTime = now;
+      if(fsOverlay.style.display === 'flex') exitFullscreen();
+      else enterFullscreen();
+      status.textContent = 'Both Fists → Fullscreen Toggle';
       ctx.restore(); return;
+    }
+  }
+
+  // 4. PINCH GESTURES FOR VOLUME AND SEEK (IMMEDIATE)
+  for(let i=0;i<mirroredLandmarks.length;i++){
+    const lm   = mirroredLandmarks[i];
+    const origHand = (res.multiHandedness?.[i]?.label) ?? 'Right';
+    const hand = mirrorHand(origHand);
+    
+    // Simple pinch detection (thumb and index finger)
+    const thumbTip = lm[4];
+    const indexTip = lm[8];
+    const distance = Math.sqrt(
+      Math.pow(thumbTip.x - indexTip.x, 2) + 
+      Math.pow(thumbTip.y - indexTip.y, 2)
+    );
+
+    if(distance < 0.05){ // PINCH DETECTED
+      lastGestureTime = now;
+      
+      if(hand === 'Right'){
+        // Right hand pinch - volume up
+        video.volume = Math.min(1, video.volume + 0.1);
+        feedback.textContent = `Volume ${Math.round(video.volume*100)}%`;
+        status.textContent = 'Right Pinch → Volume +';
+      } else {
+        // Left hand pinch - seek forward
+        video.currentTime = Math.min(video.duration, video.currentTime + 5);
+        feedback.textContent = `Seek +5s`;
+        status.textContent = 'Left Pinch → Seek +5s';
+      }
+      upd();
+      break;
     }
   }
 
@@ -270,8 +283,8 @@ async function init(){
   try {
     await camera.start();
     setGestures(true);
-    status  .textContent = 'Camera Ready | Hold 1s for gesture';
-    feedback.textContent = 'Hold gesture for 1 second';
+    status.textContent = 'Camera Ready | Gestures Active';
+    feedback.textContent = 'Show gestures to control video';
   } catch(err) {
     console.error(err);
     status.textContent = 'Camera Access Denied';
