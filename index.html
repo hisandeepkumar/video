@@ -2,7 +2,7 @@
 <html lang="hi">
 <head>
 <meta charset="utf-8">
-<title>Gesture Video Player – Volume + Seek (Horizontal Pinch)</title>
+<title>Gesture Video Player – MIRRORED</title>
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <script src="https://cdn.jsdelivr.net/npm/@mediapipe/hands/hands.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.js"></script>
@@ -40,7 +40,7 @@
 </div>
 
 <div class="card">
-  <h3 style="text-align:center">Gesture Camera</h3>
+  <h3 style="text-align:center">Gesture Camera (Mirrored)</h3>
   <canvas id="canvas"></canvas>
   <div class="status" id="status">GESTURES: <span id="toggleStatus" style="color:#0f0">ON</span></div>
   <div class="toggleBtn" id="manualToggle" style="background:#ff416c;cursor:pointer">Manual Toggle</div>
@@ -124,40 +124,57 @@ function pinchDist(lm,w,h){
   return {dist,cx};
 }
 
+/* ---------- MIRROR FUNCTION ---------- */
+function mirrorHand(hand) {
+  return hand === 'Left' ? 'Right' : 'Left';
+}
+
 function onResults(res){
   if(!webcam.videoWidth) return;
   canvas.width  = webcam.videoWidth;
   canvas.height = webcam.videoHeight;
   ctx.save();
   ctx.clearRect(0,0,canvas.width,canvas.height);
+
+  // MIRROR THE CAMERA IMAGE (जैसा तुम देखते हो)
+  ctx.scale(-1, 1);
+  ctx.translate(-canvas.width, 0);
   ctx.drawImage(res.image,0,0,canvas.width,canvas.height);
+  ctx.setTransform(1,0,0,1,0,0); // reset
 
   if(!res.multiHandLandmarks || res.multiHandLandmarks.length===0){
     for(const k of ['Left','Right']) if(pinch[k].active){ pinch[k].active=false; pinch[k].start=null; }
     ctx.restore(); return;
   }
 
-  for(let i=0;i<res.multiHandLandmarks.length;i++){
-    const lm = res.multiHandLandmarks[i];
+  // MIRROR LANDMARKS (MediaPipe original coordinates को mirror करो)
+  const mirroredLandmarks = res.multiHandLandmarks.map(lm => 
+    lm.map(p => ({ x: 1 - p.x, y: p.y, z: p.z }))
+  );
+
+  for(let i=0;i<mirroredLandmarks.length;i++){
+    const lm = mirroredLandmarks[i];
     window.drawConnectors(ctx,lm,window.HAND_CONNECTIONS,{color:'#0f0',lineWidth:2});
     window.drawLandmarks(ctx,lm,{color:'#ff0',lineWidth:1});
   }
 
   const handsInfo = [];
-  for(let i=0;i<res.multiHandLandmarks.length;i++){
-    const lm   = res.multiHandLandmarks[i];
-    const hand = (res.multiHandedness?.[i]?.label) ?? 'Right';
-    const disc = discrete(lm,hand);
-    handsInfo.push({hand, disc, lm});
+  for(let i=0;i<mirroredLandmarks.length;i++){
+    const lm   = mirroredLandmarks[i];
+    const origHand = (res.multiHandedness?.[i]?.label) ?? 'Right';
+    const mirroredHand = mirrorHand(origHand); // स्वैप करो
+    const disc = discrete(lm, mirroredHand);
+    handsInfo.push({hand: mirroredHand, disc, lm});
   }
 
   const anyPinch = pinch.Left.active || pinch.Right.active;
 
-  /* ---------- TOGGLE GESTURES ---------- */
+  /* ---------- TOGGLE GESTURES (MIRRORED) ---------- */
   if(!anyPinch && !cooldown() && handsInfo.length === 2){
     const L = handsInfo.find(h=>h.hand==='Left');
     const R = handsInfo.find(h=>h.hand==='Right');
     if(L && R){
+      // MIRROR: Left Open + Right Fist → असल में Right Open + Left Fist
       if(L.disc==='openHand' && R.disc==='fist'){
         lastAct = Date.now();
         setGestures(false);
@@ -186,10 +203,11 @@ function onResults(res){
     }
   }
 
-  /* ---------- PINCH: SEEK & VOLUME (HORIZONTAL MOVEMENT) ---------- */
-  for(let i=0;i<res.multiHandLandmarks.length;i++){
-    const lm   = res.multiHandLandmarks[i];
-    const hand = (res.multiHandedness?.[i]?.label) ?? 'Right';
+  /* ---------- PINCH: SEEK & VOLUME (MIRRORED) ---------- */
+  for(let i=0;i<mirroredLandmarks.length;i++){
+    const lm   = mirroredLandmarks[i];
+    const origHand = (res.multiHandedness?.[i]?.label) ?? 'Right';
+    const hand = mirrorHand(origHand); // स्वैप
     const p    = pinchDist(lm,canvas.width,canvas.height);
     const TH   = 50;
     const st   = pinch[hand];
@@ -199,27 +217,24 @@ function onResults(res){
         st.active = true;
         st.start  = {cx:p.cx, t:Date.now(), time:video.currentTime, vol:video.volume};
         st.last   = {cx:p.cx};
-        status.textContent = `${hand} pinch start`;
       }else{
         const elapsed = Date.now() - st.start.t;
         if(elapsed > HOLD_MS){
           const dx = p.cx - st.start.cx;
-          const sensitivity = 0.08; // एक जैसी फील के लिए
+          const sensitivity = 0.08;
 
-          if(hand === 'Right'){
-            // SEEK
+          if(hand === 'Right'){ // MIRROR: Right pinch → Volume
+            const volDelta = dx * 0.002;
+            const newVol = Math.max(0, Math.min(1, st.start.vol + volDelta));
+            video.volume = newVol;
+            feedback.textContent = `Volume ${Math.round(newVol*100)}%`;
+            status.textContent = `Right pinch → volume`;
+          } else { // Left pinch → Seek
             const seekSec = dx * sensitivity;
             const target = Math.max(0, Math.min(video.duration, st.start.time + seekSec));
             video.currentTime = target;
             feedback.textContent = `Seek ${Math.round(target)}s`;
-            status.textContent = `Right pinch → seek`;
-          } else {
-            // VOLUME
-            const volDelta = dx * 0.002; // 0-1 range में
-            const newVol = Math.max(0, Math.min(1, st.start.vol + volDelta));
-            video.volume = newVol;
-            feedback.textContent = `Volume ${Math.round(newVol*100)}%`;
-            status.textContent = `Left pinch → volume`;
+            status.textContent = `Left pinch → seek`;
           }
         }
         st.last = {cx:p.cx};
@@ -259,7 +274,7 @@ async function init(){
   try {
     await camera.start();
     setGestures(true);
-    status.textContent = 'Camera Ready | GESTURES: ON';
+    status.textContent = 'Camera Ready | GESTURES: ON (Mirrored)';
   } catch(err) {
     console.error(err);
     status.textContent = 'Camera Access Denied';
