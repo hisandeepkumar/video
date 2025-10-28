@@ -134,12 +134,9 @@ const COOLDOWN = 1200; // after action
 let lastAct = 0;
 function cooldown(){ return Date.now()-lastAct < COOLDOWN; }
 
-const pinch = { Left:{active:false,start:null,last:null}, Right:{active:false,start:null,last:null} };
-let tapTs   = { Left:0, Right:0 };
-const DOUBLE_TAP = 600;
-const HOLD_THRESHOLD = 1000; // 1 second hold
-
+// Simplified gesture detection variables
 let gestureStartTime = {}; // {gestureKey: timestamp}
+const HOLD_THRESHOLD = 1000; // 1 second hold
 
 function fingerState(lm, hand){
   const tips=[8,12,16,20], pips=[6,10,14,18];
@@ -148,18 +145,14 @@ function fingerState(lm, hand){
   const thumbExt = hand==='Right' ? lm[4].x > lm[3].x+0.02 : lm[4].x < lm[3].x-0.02;
   return {ext, thumbExt};
 }
+
 function discrete(lm, hand){
   const s = fingerState(lm,hand);
   if(s.ext===0 && !s.thumbExt) return 'fist';
   if(s.ext===4 && s.thumbExt)  return 'openHand';
   return null;
 }
-function pinchDist(lm,w,h){
-  const dx=(lm[4].x-lm[8].x)*w, dy=(lm[4].y-lm[8].y)*h;
-  const dist=Math.hypot(dx,dy);
-  const cx=(lm[4].x+lm[8].x)/2*w;
-  return {dist,cx};
-}
+
 function mirrorHand(hand){ return hand === 'Left' ? 'Right' : 'Left'; }
 
 function onResults(res){
@@ -176,7 +169,6 @@ function onResults(res){
   ctx.setTransform(1,0,0,1,0,0);
 
   if(!res.multiHandLandmarks || res.multiHandLandmarks.length===0){
-    for(const k of ['Left','Right']) if(pinch[k].active){ pinch[k].active=false; pinch[k].start=null; }
     gestureStartTime = {};
     ctx.restore(); return;
   }
@@ -200,10 +192,52 @@ function onResults(res){
     handsInfo.push({hand: mirroredHand, disc, lm});
   }
 
-  const anyPinch = pinch.Left.active || pinch.Right.active;
+  // Reset gesture timer if not holding
+  const currentGestures = handsInfo.map(h => `${h.hand}_${h.disc}`).join('_');
+  if(currentGestures !== Object.keys(gestureStartTime).join('_')){
+    gestureStartTime = {};
+  }
 
-  // === 1. BOTH FISTS → FULLSCREEN (1 sec hold) ===
-  if(handsInfo.length === 2 && !anyPinch && !cooldown()){
+  // === SIMPLE GESTURE DETECTION ===
+  
+  // 1. LEFT HAND OPEN → PLAY
+  if(handsInfo.length === 1 && !cooldown()){
+    const h = handsInfo[0];
+    if(h.hand==='Left' && h.disc==='openHand'){
+      const key = 'left_open';
+      if(!gestureStartTime[key]) gestureStartTime[key] = Date.now();
+      if(Date.now() - gestureStartTime[key] >= HOLD_THRESHOLD){
+        lastAct = Date.now();
+        video.play().catch(()=>{});
+        status.textContent='Left Open → Play';
+        feedback.textContent='Playing';
+        upd();
+        gestureStartTime = {};
+      }
+      ctx.restore(); return;
+    }
+  }
+
+  // 2. RIGHT HAND OPEN → PAUSE
+  if(handsInfo.length === 1 && !cooldown()){
+    const h = handsInfo[0];
+    if(h.hand==='Right' && h.disc==='openHand'){
+      const key = 'right_open';
+      if(!gestureStartTime[key]) gestureStartTime[key] = Date.now();
+      if(Date.now() - gestureStartTime[key] >= HOLD_THRESHOLD){
+        lastAct = Date.now();
+        video.pause();
+        status.textContent='Right Open → Pause';
+        feedback.textContent='Paused';
+        upd();
+        gestureStartTime = {};
+      }
+      ctx.restore(); return;
+    }
+  }
+
+  // 3. BOTH FISTS → FULLSCREEN TOGGLE
+  if(handsInfo.length === 2 && !cooldown()){
     const L = handsInfo.find(h=>h.hand==='Left');
     const R = handsInfo.find(h=>h.hand==='Right');
     if(L && R && L.disc==='fist' && R.disc==='fist'){
@@ -213,120 +247,14 @@ function onResults(res){
         lastAct = Date.now();
         if(fsOverlay.style.display === 'flex') exitFullscreen();
         else enterFullscreen();
-        status.textContent = 'Both Fists (1s) → Fullscreen';
+        status.textContent = 'Both Fists → Fullscreen Toggle';
         gestureStartTime = {};
       }
       ctx.restore(); return;
     }
-  }
-
-  // === 2. TOGGLE GESTURES (1 sec hold) ===
-  if(handsInfo.length === 2 && !anyPinch && !cooldown()){
-    const L = handsInfo.find(h=>h.hand==='Left');
-    const R = handsInfo.find(h=>h.hand==='Right');
-    if(L && R){
-      const key = `${L.disc}_${R.disc}`;
-      if(!gestureStartTime[key]) gestureStartTime[key] = Date.now();
-      if(Date.now() - gestureStartTime[key] >= HOLD_THRESHOLD){
-        lastAct = Date.now();
-        if(L.disc==='openHand' && R.disc==='fist') setGestures(false);
-        if(R.disc==='openHand' && L.disc==='fist') setGestures(true);
-        gestureStartTime = {};
-      }
-      ctx.restore(); return;
-    }
-  }
-
-  if(!GESTURES_ENABLED){ gestureStartTime = {}; ctx.restore(); return; }
-
-  // === 3. PLAY / PAUSE (1 sec hold) ===
-  if(handsInfo.length === 1 && !anyPinch && !cooldown()){
-    const h = handsInfo[0];
-    if(h.disc==='openHand'){
-      const key = `single_${h.hand}_open`;
-      if(!gestureStartTime[key]) gestureStartTime[key] = Date.now();
-      if(Date.now() - gestureStartTime[key] >= HOLD_THRESHOLD){
-        lastAct = Date.now();
-        if(h.hand==='Left'){
-          video.play().catch(()=>{});
-          status.textContent='Left Open (1s) → Play';
-          feedback.textContent='Playing';
-        } else {
-          video.pause();
-          status.textContent='Right Open (1s) → Pause';
-          feedback.textContent='Paused';
-        }
-        upd();
-        gestureStartTime = {};
-      }
-      ctx.restore(); return;
-    }
-  }
-
-  // === 4. PINCH → ONLY IF FINGERS ARE OPEN (not fist) ===
-  for(let i=0;i<mirroredLandmarks.length;i++){
-    const lm   = mirroredLandmarks[i];
-    const origHand = (res.multiHandedness?.[i]?.label) ?? 'Right';
-    const hand = mirrorHand(origHand);
-    const disc = discrete(lm, hand);
-
-    // BLOCK PINCH IN FIST
-    if(disc === 'fist') continue;
-
-    const p    = pinchDist(lm,canvas.width,canvas.height);
-    const TH   = 50;
-    const st   = pinch[hand];
-
-    if(p.dist < TH){
-      if(!st.active){
-        st.active = true;
-        st.start  = {cx:p.cx, t:Date.now(), time:video.currentTime, vol:video.volume};
-        st.last   = {cx:p.cx};
-      }else{
-        const elapsed = Date.now() - st.start.t;
-        if(elapsed > 300){
-          const dx = p.cx - st.start.cx;
-          if(hand === 'Right'){
-            const volDelta = dx * 0.002;
-            const newVol = Math.max(0, Math.min(1, st.start.vol + volDelta));
-            video.volume = newVol;
-            feedback.textContent = `Volume ${Math.round(newVol*100)}%`;
-            status.textContent = `Right pinch → volume`;
-          } else {
-            const seekSec = dx * 0.08;
-            const target = Math.max(0, Math.min(video.duration, st.start.time + seekSec));
-            video.currentTime = target;
-            feedback.textContent = `Seek ${Math.round(target)}s`;
-            status.textContent = `Left pinch → seek`;
-          }
-        }
-        st.last = {cx:p.cx};
-      }
-    }else{
-      if(st.active){
-        const now = Date.now();
-        const dur = now - st.start.t;
-        if(dur < 300){
-          if(now - tapTs[hand] < DOUBLE_TAP && !cooldown()){
-            lastAct = now;
-            if(hand==='Left'){ seek(-10); }
-            else{ seek(10); }
-            tapTs[hand]=0;
-          }else tapTs[hand]=now;
-        }
-        st.active=false; st.start=null; st.last=null;
-      }
-    }
-  }
-
-  // Reset gesture timer if not holding
-  const currentGestures = handsInfo.map(h => `${h.hand}_${h.disc}`).join('_');
-  if(currentGestures !== Object.keys(gestureStartTime).join('_')){
-    gestureStartTime = {};
   }
 
   ctx.restore();
-  upd();
 }
 
 /* ---------- INIT ---------- */
