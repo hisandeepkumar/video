@@ -2,7 +2,7 @@
 <html lang="hi">
 <head>
 <meta charset="utf-8">
-<title>Gesture Video Player – Toggle ON/OFF</title>
+<title>Gesture Video Player – Fixed Camera</title>
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <script src="https://cdn.jsdelivr.net/npm/@mediapipe/hands/hands.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.js"></script>
@@ -16,7 +16,7 @@
   .controls{display:flex;gap:8px;margin-top:12px;flex-wrap:wrap}
   .btn{padding:8px 14px;border-radius:999px;background:#4a00e0;color:#fff;border:none;cursor:pointer;font-weight:700}
   .btn.full{background:#ff416c}
-  #webcam{display:none}
+  #webcam{width:1px;height:1px;opacity:0;position:absolute;pointer-events:none} /* छुपाया, लेकिन DOM में है */
   canvas{width:100%;max-width:560px;border-radius:8px;background:#000}
   .status,.feedback{margin-top:8px;padding:8px;border-radius:8px;background:rgba(255,255,255,.06);text-align:center}
   .toggleBtn{font-weight:700;padding:10px 16px;border-radius:8px;margin-top:8px;display:inline-block}
@@ -43,8 +43,11 @@
   <h3 style="text-align:center">Gesture Camera</h3>
   <canvas id="canvas"></canvas>
   <div class="status" id="status">GESTURES: <span id="toggleStatus" style="color:#0f0">ON</span></div>
-  <div class="toggleBtn" id="manualToggle" style="background:#ff416c;cursor:pointer">Manual Toggle (Click to switch)</div>
+  <div class="toggleBtn" id="manualToggle" style="background:#ff416c;cursor:pointer">Manual Toggle</div>
 </div>
+
+<!-- यही video element MediaPipe को चाहिए -->
+<video id="webcam" autoplay playsinline></video>
 
 <script>
 /* ---------- VIDEO UI ---------- */
@@ -62,7 +65,7 @@ upload.onclick = ()=>fileIn.click();
 fileIn.onchange = e=>{
   const f = e.target.files[0];
   if(!f) return;
-  video.src = URL.createObjectURL(f);
+  video.src = URL.createObjectObjectURL(f);
   video.play().catch(()=>{});
 };
 
@@ -88,7 +91,7 @@ function setGestures(state){
 manualToggle.onclick = () => setGestures(!GESTURES_ENABLED);
 
 /* ---------- MEDIAPIPE ---------- */
-const webcam = document.getElementById('webcam');
+const webcam = document.getElementById('webcam');  // अब DOM में है
 const canvas = document.getElementById('canvas');
 const ctx    = canvas.getContext('2d');
 let hands, camera;
@@ -156,7 +159,7 @@ function onResults(res){
 
   const anyPinch = pinch.Left.active || pinch.Right.active;
 
-  /* ---------- TOGGLE GESTURES (ONLY THESE TWO) ---------- */
+  /* ---------- TOGGLE GESTURES ---------- */
   if(!anyPinch && !cooldown() && handsInfo.length === 2){
     const L = handsInfo.find(h=>h.hand==='Left');
     const R = handsInfo.find(h=>h.hand==='Right');
@@ -174,12 +177,11 @@ function onResults(res){
     }
   }
 
-  /* ---------- ALL OTHER GESTURES (ONLY WHEN ENABLED) ---------- */
   if(!GESTURES_ENABLED){
     ctx.restore(); return;
   }
 
-  /* Single open hand → Play / Pause */
+  /* Single open hand */
   if(!anyPinch && !cooldown() && handsInfo.length === 1){
     const h = handsInfo[0];
     if(h.disc==='openHand'){
@@ -190,7 +192,7 @@ function onResults(res){
     }
   }
 
-  /* Pinch Gestures */
+  /* Pinch */
   for(let i=0;i<res.multiHandLandmarks.length;i++){
     const lm   = res.multiHandLandmarks[i];
     const hand = (res.multiHandedness?.[i]?.label) ?? 'Right';
@@ -247,9 +249,19 @@ async function init(){
   hands.setOptions({maxNumHands:2,modelComplexity:1,minDetectionConfidence:0.6,minTrackingConfidence:0.6});
   hands.onResults(onResults);
 
-  camera = new window.Camera(webcam,{onFrame:async()=>{await hands.send({image:webcam});},width:640,height:480});
-  await camera.start();
-  setGestures(true);
+  camera = new window.Camera(webcam,{
+    onFrame:async()=>{await hands.send({image:webcam});},
+    width:640,height:480
+  });
+  try {
+    await camera.start();
+    setGestures(true);
+    status.textContent = 'Camera Ready | GESTURES: ON';
+  } catch(err) {
+    console.error(err);
+    status.textContent = 'Camera Access Denied';
+    feedback.textContent = 'Please allow camera';
+  }
 }
 window.addEventListener('load',init);
 </script>
