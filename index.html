@@ -2,7 +2,7 @@
 <html lang="hi">
 <head>
 <meta charset="utf-8">
-<title>Gesture Video Player – MIRRORED</title>
+<title>Gesture Video Player – MIRRORED + FULLSCREEN</title>
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <script src="https://cdn.jsdelivr.net/npm/@mediapipe/hands/hands.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.js"></script>
@@ -20,6 +20,9 @@
   canvas{width:100%;max-width:560px;border-radius:8px;background:#000}
   .status,.feedback{margin-top:8px;padding:8px;border-radius:8px;background:rgba(255,255,255,.06);text-align:center}
   .toggleBtn{font-weight:700;padding:10px 16px;border-radius:8px;margin-top:8px;display:inline-block}
+  .fullscreen-overlay{position:fixed;top:0;left:0;width:100vw;height:100vh;background:#000;z-index:9999;display:none;justify-content:center;align-items:center}
+  .fullscreen-overlay video{width:100%;height:100%;object-fit:contain}
+  .close-fs{position:absolute;top:20px;right:20px;background:rgba(0,0,0,.6);color:#fff;border:none;border-radius:50%;width:50px;height:50px;font-size:24px;cursor:pointer}
 </style>
 </head>
 <body>
@@ -33,6 +36,7 @@
     <button class="btn" id="volDown">-Vol</button>
     <button class="btn" id="fwd">+10s</button>
     <button class="btn" id="back">-10s</button>
+    <button class="btn full" id="fsBtn">Fullscreen</button>
   </div>
   <input type="file" id="fileInput" accept="video/*" style="display:none">
   <button class="btn" id="uploadBtn" style="margin-top:8px">Upload Video</button>
@@ -48,35 +52,73 @@
 
 <video id="webcam" autoplay playsinline></video>
 
+<!-- Fullscreen Overlay -->
+<div class="fullscreen-overlay" id="fsOverlay">
+  <button class="close-fs" id="closeFs">X</button>
+  <video id="fsVideo" controls></video>
+</div>
+
 <script>
 /* ---------- VIDEO UI ---------- */
 const video    = document.getElementById('video');
+const fsVideo  = document.getElementById('fsVideo');
+const fsOverlay= document.getElementById('fsOverlay');
+const closeFs  = document.getElementById('closeFs');
 const fileIn   = document.getElementById('fileInput');
 const upload   = document.getElementById('uploadBtn');
 const feedback = document.getElementById('feedback');
 const status   = document.getElementById('status');
 const toggleStatus = document.getElementById('toggleStatus');
 const manualToggle = document.getElementById('manualToggle');
+const fsBtn    = document.getElementById('fsBtn');
 
-video.src = "https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/BigBuckBunny.mp4";
+let currentSrc = "https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/BigBuckBunny.mp4";
+video.src = currentSrc;
+fsVideo.src = currentSrc;
 
-upload.onclick = ()=>fileIn.click();
-fileIn.onchange = e=>{
+// Upload Video (FIXED)
+upload.onclick = () => fileIn.click();
+fileIn.onchange = e => {
   const f = e.target.files[0];
-  if(!f) return;
-  video.src = URL.createObjectURL(f);
-  video.play().catch(()=>{});
+  if (!f) return;
+  const url = URL.createObjectURL(f);
+  currentSrc = url;
+  video.src = url;
+  fsVideo.src = url;
+  video.play().catch(() => {});
+  feedback.textContent = 'Video Uploaded!';
 };
 
-document.getElementById('playPauseBtn').onclick = ()=> video.paused?video.play():video.pause();
-document.getElementById('volUp').onclick   = ()=> changeVol(0.1);
-document.getElementById('volDown').onclick = ()=> changeVol(-0.1);
-document.getElementById('fwd').onclick     = ()=> seek(10);
-document.getElementById('back').onclick    = ()=> seek(-10);
+// Play/Pause Button
+document.getElementById('playPauseBtn').onclick = () => {
+  video.paused ? video.play() : video.pause();
+  upd();
+};
+document.getElementById('volUp').onclick   = () => changeVol(0.1);
+document.getElementById('volDown').onclick = () => changeVol(-0.1);
+document.getElementById('fwd').onclick     = () => seek(10);
+document.getElementById('back').onclick    = () => seek(-10);
 
 function changeVol(d){ video.volume = Math.max(0,Math.min(1,video.volume+d)); upd(); }
 function seek(s){ video.currentTime = Math.max(0,Math.min(video.duration,video.currentTime+s)); upd(); }
-function upd(){ feedback.textContent = `Time ${Math.round(video.currentTime)}s | Vol ${Math.round(video.volume*100)}%`; }
+function upd(){ 
+  feedback.textContent = `Time ${Math.round(video.currentTime)}s | Vol ${Math.round(video.volume*100)}%`; 
+}
+
+// Fullscreen Toggle
+fsBtn.onclick = () => enterFullscreen();
+closeFs.onclick = () => exitFullscreen();
+function enterFullscreen(){
+  fsOverlay.style.display = 'flex';
+  fsVideo.currentTime = video.currentTime;
+  if (!video.paused) fsVideo.play().catch(()=>{});
+}
+function exitFullscreen(){
+  fsOverlay.style.display = 'none';
+  video.currentTime = fsVideo.currentTime;
+  if (!fsVideo.paused) video.play().catch(()=>{});
+  fsVideo.pause();
+}
 
 /* ---------- GESTURE STATE ---------- */
 let GESTURES_ENABLED = true;
@@ -123,11 +165,7 @@ function pinchDist(lm,w,h){
   const cx=(lm[4].x+lm[8].x)/2*w;
   return {dist,cx};
 }
-
-/* ---------- MIRROR FUNCTION ---------- */
-function mirrorHand(hand) {
-  return hand === 'Left' ? 'Right' : 'Left';
-}
+function mirrorHand(hand){ return hand === 'Left' ? 'Right' : 'Left'; }
 
 function onResults(res){
   if(!webcam.videoWidth) return;
@@ -136,18 +174,17 @@ function onResults(res){
   ctx.save();
   ctx.clearRect(0,0,canvas.width,canvas.height);
 
-  // MIRROR THE CAMERA IMAGE (जैसा तुम देखते हो)
+  // MIRROR IMAGE
   ctx.scale(-1, 1);
   ctx.translate(-canvas.width, 0);
   ctx.drawImage(res.image,0,0,canvas.width,canvas.height);
-  ctx.setTransform(1,0,0,1,0,0); // reset
+  ctx.setTransform(1,0,0,1,0,0);
 
   if(!res.multiHandLandmarks || res.multiHandLandmarks.length===0){
     for(const k of ['Left','Right']) if(pinch[k].active){ pinch[k].active=false; pinch[k].start=null; }
     ctx.restore(); return;
   }
 
-  // MIRROR LANDMARKS (MediaPipe original coordinates को mirror करो)
   const mirroredLandmarks = res.multiHandLandmarks.map(lm => 
     lm.map(p => ({ x: 1 - p.x, y: p.y, z: p.z }))
   );
@@ -162,52 +199,65 @@ function onResults(res){
   for(let i=0;i<mirroredLandmarks.length;i++){
     const lm   = mirroredLandmarks[i];
     const origHand = (res.multiHandedness?.[i]?.label) ?? 'Right';
-    const mirroredHand = mirrorHand(origHand); // स्वैप करो
+    const mirroredHand = mirrorHand(origHand);
     const disc = discrete(lm, mirroredHand);
     handsInfo.push({hand: mirroredHand, disc, lm});
   }
 
   const anyPinch = pinch.Left.active || pinch.Right.active;
 
-  /* ---------- TOGGLE GESTURES (MIRRORED) ---------- */
+  /* ---------- BOTH FISTS → FULLSCREEN TOGGLE ---------- */
+  if(!anyPinch && !cooldown() && handsInfo.length === 2){
+    const L = handsInfo.find(h=>h.hand==='Left');
+    const R = handsInfo.find(h=>h.hand==='Right');
+    if(L && R && L.disc==='fist' && R.disc==='fist'){
+      lastAct = Date.now();
+      if(fsOverlay.style.display === 'flex') exitFullscreen();
+      else enterFullscreen();
+      status.textContent = 'Both Fists → Fullscreen';
+      ctx.restore(); return;
+    }
+  }
+
+  /* ---------- TOGGLE GESTURES ---------- */
   if(!anyPinch && !cooldown() && handsInfo.length === 2){
     const L = handsInfo.find(h=>h.hand==='Left');
     const R = handsInfo.find(h=>h.hand==='Right');
     if(L && R){
-      // MIRROR: Left Open + Right Fist → असल में Right Open + Left Fist
       if(L.disc==='openHand' && R.disc==='fist'){
-        lastAct = Date.now();
-        setGestures(false);
-        ctx.restore(); return;
+        lastAct = Date.now(); setGestures(false); ctx.restore(); return;
       }
       if(R.disc==='openHand' && L.disc==='fist'){
-        lastAct = Date.now();
-        setGestures(true);
-        ctx.restore(); return;
+        lastAct = Date.now(); setGestures(true); ctx.restore(); return;
       }
     }
   }
 
-  if(!GESTURES_ENABLED){
-    ctx.restore(); return;
-  }
+  if(!GESTURES_ENABLED){ ctx.restore(); return; }
 
-  /* Single open hand */
+  /* ---------- PLAY / PAUSE (Single Open Hand) ---------- */
   if(!anyPinch && !cooldown() && handsInfo.length === 1){
     const h = handsInfo[0];
     if(h.disc==='openHand'){
       lastAct = Date.now();
-      if(h.hand==='Left'){ video.play().catch(()=>{}); status.textContent='Left Open → Play'; feedback.textContent='Playing'; }
-      else{ video.pause(); status.textContent='Right Open → Pause'; feedback.textContent='Paused'; }
+      if(h.hand==='Left'){
+        video.play().catch(()=>{}); 
+        status.textContent='Left Open → Play'; 
+        feedback.textContent='Playing';
+      } else {
+        video.pause(); 
+        status.textContent='Right Open → Pause'; 
+        feedback.textContent='Paused';
+      }
       upd(); ctx.restore(); return;
     }
   }
 
-  /* ---------- PINCH: SEEK & VOLUME (MIRRORED) ---------- */
+  /* ---------- PINCH CONTROLS ---------- */
   for(let i=0;i<mirroredLandmarks.length;i++){
     const lm   = mirroredLandmarks[i];
     const origHand = (res.multiHandedness?.[i]?.label) ?? 'Right';
-    const hand = mirrorHand(origHand); // स्वैप
+    const hand = mirrorHand(origHand);
     const p    = pinchDist(lm,canvas.width,canvas.height);
     const TH   = 50;
     const st   = pinch[hand];
@@ -223,7 +273,7 @@ function onResults(res){
           const dx = p.cx - st.start.cx;
           const sensitivity = 0.08;
 
-          if(hand === 'Right'){ // MIRROR: Right pinch → Volume
+          if(hand === 'Right'){ // Right pinch → Volume
             const volDelta = dx * 0.002;
             const newVol = Math.max(0, Math.min(1, st.start.vol + volDelta));
             video.volume = newVol;
